@@ -176,13 +176,9 @@ function App() {
     const setupMetaTracking = async () => {
       try {
         const storedConsent = await getAnalyticsConsent();
-        // If consent is true (or not yet determined on platforms where opt-in is implicit, but gate tracking if explicitly opted out)
-        // If user already logged in or previously agreed, consent is true.
+        // If consent is true (or not explicitly false/opted-out)
         const hasConsent = storedConsent !== false;
         await initializeMetaTracking(hasConsent);
-        if (hasConsent) {
-          logMetaEvent('fb_mobile_activate_app');
-        }
       } catch (err) {
         console.warn('Meta tracking initialization failed:', err);
       }
