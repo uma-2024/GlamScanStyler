@@ -98,8 +98,8 @@ android {
         applicationId "com.glammefypartner"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 25
-        versionName "1.0.25"
+        versionCode 26
+        versionName "1.0.26"
         ndk {
             abiFilters "armeabi-v7a", "arm64-v8a", "x86", "x86_64"
         }
