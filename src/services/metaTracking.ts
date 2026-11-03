@@ -41,9 +41,17 @@ export async function initializeMetaTracking(hasAnalyticsConsent: boolean = true
       Platform.OS === 'ios' ? attGranted : true,
     );
 
+    // Verify native SDK is present before marking ready
+    if (typeof Settings?.initializeSDK !== 'function') {
+      console.warn('⚠️ Meta SDK native module is not available on this platform/build');
+      isMetaTrackingReady = false;
+      return false;
+    }
+
     // Initialize SDK
-    Settings?.initializeSDK?.();
+    Settings.initializeSDK();
     isMetaTrackingReady = true;
+    console.log('✅ Meta tracking initialized successfully');
     return true;
   } catch (error) {
     console.warn('⚠️ Meta tracking initialization failed gracefully:', error);

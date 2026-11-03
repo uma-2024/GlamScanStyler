@@ -11,6 +11,7 @@ import com.facebook.react.ReactApplication
 import com.facebook.react.ReactHost
 import com.facebook.react.ReactNativeApplicationEntryPoint.loadReactNative
 import com.facebook.react.defaults.DefaultReactHost.getDefaultReactHost
+import com.facebook.reactnative.androidsdk.FBSDKPackage
 
 class MainApplication : Application(), ReactApplication {
 
@@ -19,7 +20,14 @@ class MainApplication : Application(), ReactApplication {
       context = applicationContext,
       packageList =
         PackageList(this).packages.apply {
-        // Cleaned up user-app native packages
+          try {
+            // Guarantee Facebook SDK bridge is registered in React Native host
+            if (none { it is FBSDKPackage }) {
+              add(FBSDKPackage())
+            }
+          } catch (e: Exception) {
+            android.util.Log.e("MainApplication", "FBSDKPackage failed to load", e)
+          }
         },
     )
   }
