@@ -838,9 +838,13 @@ function App() {
       console.log('💾 Storing userId:', userId);
       setCurrentUserId(userId);
       // Persist user consent upon agreeing to terms/logging in
-      await setAnalyticsConsent(true);
-      await initializeMetaTracking(true);
-      logMetaEvent('CompletedRegistration', { method: 'partner_login' });
+      try {
+        await setAnalyticsConsent(true);
+        await initializeMetaTracking(true);
+        logMetaEvent('CompletedRegistration', { method: 'partner_login' });
+      } catch (trackErr) {
+        console.warn('⚠️ Non-blocking tracking error on login:', trackErr);
+      }
 
       const loginPhoneNumber = getProfilePhoneNumber(phoneNumber);
       if (loginPhoneNumber) {
@@ -858,9 +862,13 @@ function App() {
       await navigateToNextIncompleteStep(userId);
     } else {
       console.warn('⚠️ No userId received from login response, going to verifiedStatus');
-      await setAnalyticsConsent(true);
-      await initializeMetaTracking(true);
-      logMetaEvent('CompletedRegistration', { method: 'partner_login' });
+      try {
+        await setAnalyticsConsent(true);
+        await initializeMetaTracking(true);
+        logMetaEvent('CompletedRegistration', { method: 'partner_login' });
+      } catch (trackErr) {
+        console.warn('⚠️ Non-blocking tracking error on login fallback:', trackErr);
+      }
       setShowWelcomeModalOnLogin(true);
       setDisplayWelcomeModal(true);
       setCurrentScreen('verifiedStatus');

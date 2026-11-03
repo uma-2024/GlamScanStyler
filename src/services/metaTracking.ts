@@ -12,51 +12,62 @@ let isMetaTrackingReady = false;
 export async function initializeMetaTracking(hasAnalyticsConsent: boolean = true): Promise<boolean> {
   isMetaTrackingReady = false;
 
-  if (!hasAnalyticsConsent) {
-    Settings.setAutoLogAppEventsEnabled(false);
-    Settings.setAdvertiserIDCollectionEnabled(false);
-    Settings.setAdvertiserTrackingEnabled(false);
+  try {
+    if (!hasAnalyticsConsent) {
+      Settings?.setAutoLogAppEventsEnabled?.(false);
+      Settings?.setAdvertiserIDCollectionEnabled?.(false);
+      Settings?.setAdvertiserTrackingEnabled?.(false);
+      return false;
+    }
+
+    let attGranted = false;
+    if (Platform.OS === 'ios') {
+      try {
+        // Request App Tracking Transparency permission on iOS 14+
+        const result = await request(PERMISSIONS.IOS.APP_TRACKING_TRANSPARENCY);
+        attGranted = result === RESULTS.GRANTED;
+        Settings?.setAdvertiserTrackingEnabled?.(attGranted);
+      } catch {
+        attGranted = false;
+        Settings?.setAdvertiserTrackingEnabled?.(false);
+      }
+    }
+
+    // Automatic event collection follows consent
+    Settings?.setAutoLogAppEventsEnabled?.(true);
+
+    // Advertiser ID collection: follow ATT on iOS, enabled on Android
+    Settings?.setAdvertiserIDCollectionEnabled?.(
+      Platform.OS === 'ios' ? attGranted : true,
+    );
+
+    // Initialize SDK
+    Settings?.initializeSDK?.();
+    isMetaTrackingReady = true;
+    return true;
+  } catch (error) {
+    console.warn('⚠️ Meta tracking initialization failed gracefully:', error);
+    isMetaTrackingReady = false;
     return false;
   }
-
-  let attGranted = false;
-  if (Platform.OS === 'ios') {
-    try {
-      // Request App Tracking Transparency permission on iOS 14+
-      const result = await request(PERMISSIONS.IOS.APP_TRACKING_TRANSPARENCY);
-      attGranted = result === RESULTS.GRANTED;
-      Settings.setAdvertiserTrackingEnabled(attGranted);
-    } catch {
-      attGranted = false;
-      Settings.setAdvertiserTrackingEnabled(false);
-    }
-  }
-
-  // Automatic event collection follows consent
-  Settings.setAutoLogAppEventsEnabled(true);
-
-  // Advertiser ID collection: follow ATT on iOS, enabled on Android
-  Settings.setAdvertiserIDCollectionEnabled(
-    Platform.OS === 'ios' ? attGranted : true,
-  );
-
-  // Initialize SDK
-  Settings.initializeSDK();
-  isMetaTrackingReady = true;
-  return true;
 }
 
 /**
  * Logs a standard or custom Meta App Event.
+ * Completely fail-safe: never throws or blocks app/login flow.
  */
 export function logMetaEvent(eventName: string, params?: Record<string, any>): void {
   if (!isMetaTrackingReady) {
     return;
   }
-  if (params) {
-    AppEventsLogger.logEvent(eventName, params);
-  } else {
-    AppEventsLogger.logEvent(eventName);
+  try {
+    if (params) {
+      AppEventsLogger?.logEvent?.(eventName, params);
+    } else {
+      AppEventsLogger?.logEvent?.(eventName);
+    }
+  } catch (error) {
+    console.warn('⚠️ Failed to log Meta event:', eventName, error);
   }
 }
 
@@ -74,7 +85,11 @@ export function logMetaPurchase(
   if (!isMetaTrackingReady) {
     return;
   }
-  AppEventsLogger.logPurchase(amount, currency, params);
+  try {
+    AppEventsLogger?.logPurchase?.(amount, currency, params);
+  } catch (error) {
+    console.warn('⚠️ Failed to log Meta purchase:', error);
+  }
 }
 
 export { AppEventsLogger, Settings };
