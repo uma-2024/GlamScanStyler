@@ -56,7 +56,8 @@ import BottomNavigation from './src/components/BottomNavigation';
 import CustomModal from './src/components/CustomModal';
 import GlobalPendingBookingModal from './src/components/GlobalPendingBookingModal';
 import { initializeFCM } from './src/services/fcmService';
-import { initializeMetaTracking } from './src/services/metaTracking';
+import { initializeMetaTracking, logMetaEvent } from './src/services/metaTracking';
+import { getAnalyticsConsent, setAnalyticsConsent } from './src/utils/authStorage';
 import { useModal } from './src/hooks/useModal';
 import { signInStylistWithGoogle, signOutGoogleStylist } from './src/services/googleAuth';
 import { signInStylistWithApple } from './src/services/appleAuth';
@@ -172,9 +173,21 @@ function App() {
   const [currentUserId, setCurrentUserId] = useState<string>(''); // Store logged-in user ID
   useEffect(() => initializeFCM(currentUserId), [currentUserId]);
   useEffect(() => {
-    initializeMetaTracking(true).catch(err => {
-      console.warn('Meta tracking initialization failed:', err);
-    });
+    const setupMetaTracking = async () => {
+      try {
+        const storedConsent = await getAnalyticsConsent();
+        // If consent is true (or not yet determined on platforms where opt-in is implicit, but gate tracking if explicitly opted out)
+        // If user already logged in or previously agreed, consent is true.
+        const hasConsent = storedConsent !== false;
+        await initializeMetaTracking(hasConsent);
+        if (hasConsent) {
+          logMetaEvent('fb_mobile_activate_app');
+        }
+      } catch (err) {
+        console.warn('Meta tracking initialization failed:', err);
+      }
+    };
+    setupMetaTracking();
   }, []);
   const [directChatBooking, setDirectChatBooking] = useState<{
     bookingId: string;
@@ -606,6 +619,7 @@ function App() {
       const lastScreen = navigationHistory.current[navigationHistory.current.length - 1];
       if (lastScreen !== currentScreen) {
         navigationHistory.current.push(currentScreen);
+        logMetaEvent('ScreenView', { screen_name: currentScreen });
         // Keep only last 20 screens to prevent memory issues
         if (navigationHistory.current.length > 20) {
           navigationHistory.current.shift();
@@ -827,6 +841,11 @@ function App() {
     if (userId) {
       console.log('💾 Storing userId:', userId);
       setCurrentUserId(userId);
+      // Persist user consent upon agreeing to terms/logging in
+      await setAnalyticsConsent(true);
+      await initializeMetaTracking(true);
+      logMetaEvent('CompletedRegistration', { method: 'partner_login' });
+
       const loginPhoneNumber = getProfilePhoneNumber(phoneNumber);
       if (loginPhoneNumber) {
         setProfileData(prev => ({
@@ -843,6 +862,9 @@ function App() {
       await navigateToNextIncompleteStep(userId);
     } else {
       console.warn('⚠️ No userId received from login response, going to verifiedStatus');
+      await setAnalyticsConsent(true);
+      await initializeMetaTracking(true);
+      logMetaEvent('CompletedRegistration', { method: 'partner_login' });
       setShowWelcomeModalOnLogin(true);
       setDisplayWelcomeModal(true);
       setCurrentScreen('verifiedStatus');

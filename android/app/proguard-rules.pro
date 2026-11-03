@@ -12,3 +12,10 @@
 # Notifee ProGuard rules
 -keep class com.invertase.notifee.** { *; }
 -dontwarn com.invertase.notifee.**
+
+# Facebook SDK ProGuard rules
+-keep class com.facebook.** { *; }
+-keepclassmembers class * extends com.facebook.FacebookActivity { *; }
+-dontwarn com.facebook.**
+-keepattributes Signature
+-keepattributes *Annotation*

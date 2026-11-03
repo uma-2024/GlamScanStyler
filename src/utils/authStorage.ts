@@ -107,3 +107,23 @@ export const getRemainingSessionTime = async (): Promise<number> => {
 
   return Math.round(remainingTime / (60 * 60 * 1000)); // Return in hours
 };
+
+const ANALYTICS_CONSENT_KEY = '@GlammefyPartner:analyticsConsent';
+
+export const getAnalyticsConsent = async (): Promise<boolean | null> => {
+  try {
+    const val = await AsyncStorage.getItem(ANALYTICS_CONSENT_KEY);
+    if (val === null) return null;
+    return val === 'true';
+  } catch {
+    return null;
+  }
+};
+
+export const setAnalyticsConsent = async (consent: boolean): Promise<void> => {
+  try {
+    await AsyncStorage.setItem(ANALYTICS_CONSENT_KEY, consent ? 'true' : 'false');
+  } catch (error) {
+    console.error('Error saving analytics consent:', error);
+  }
+};

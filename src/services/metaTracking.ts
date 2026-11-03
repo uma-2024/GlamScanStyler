@@ -62,6 +62,9 @@ export function logMetaEvent(eventName: string, params?: Record<string, any>): v
 
 /**
  * Logs a purchase event.
+ * NOTE: Automatic in-app purchase logging is ON by default in Meta App Events settings.
+ * To avoid duplicate purchase counts in Meta Analytics, do NOT call this method manually
+ * unless automatic purchase logging has been disabled in the Meta Developer Console.
  */
 export function logMetaPurchase(
   amount: number,
