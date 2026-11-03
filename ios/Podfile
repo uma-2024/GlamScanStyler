@@ -1,0 +1,92 @@
+# Resolve react_native_pods.rb with node to allow for hoisting
+require Pod::Executable.execute_command('node', ['-p',
+  'require.resolve(
+    "react-native/scripts/react_native_pods.rb",
+    {paths: [process.argv[1]]},
+  )', __dir__]).strip
+
+platform :ios, '15.1'
+# use_modular_headers!
+prepare_react_native_project!
+
+node_modules_path = '../node_modules'
+require_relative "#{node_modules_path}/react-native-permissions/scripts/setup"
+
+setup_permissions([
+  'Camera',
+  'LocationWhenInUse',
+  'PhotoLibrary',
+])
+
+linkage = ENV['USE_FRAMEWORKS']
+if linkage != nil
+  Pod::UI.puts "Configuring Pod with #{linkage}ally linked Frameworks".green
+  use_frameworks! :linkage => linkage.to_sym
+end
+
+target 'GlamScanStyler' do
+  config = use_native_modules!
+pod 'GoogleUtilities', :modular_headers => true
+pod 'RecaptchaInterop', :modular_headers => true
+pod 'FirebaseCoreInternal', :modular_headers => true
+pod 'FirebaseCore', :modular_headers => true
+pod 'FirebaseCoreExtension', :modular_headers => true
+pod 'FirebaseInstallations', :modular_headers => true
+pod 'FirebaseMessaging', :modular_headers => true
+pod 'AppCheckCore', :modular_headers => true
+  use_react_native!(
+    :path => config[:reactNativePath],
+    # An absolute path to your application root.
+    :app_path => "#{Pod::Config.instance.installation_root}/.."
+  )
+
+  post_install do |installer|
+    react_native_post_install(
+      installer,
+      config[:reactNativePath],
+      :mac_catalyst_enabled => false,
+      # :ccache_enabled => true
+    )
+
+    # react-native-iap / OpenIAP currently generates its pod target under
+    # `Target Support Files/openiap`, but Xcode's dependency scanner can still
+    # look for the legacy `Headers/Public/OpenIAP` path. We create a
+    # compatibility symlink so both layouts resolve.
+    openiap_public_dir = File.join(installer.sandbox.root, 'Headers', 'Public', 'OpenIAP')
+    openiap_target_dir = File.join(installer.sandbox.root, 'Target Support Files', 'openiap')
+    if File.exist?(openiap_target_dir)
+      FileUtils.rm_f(openiap_public_dir) if File.symlink?(openiap_public_dir)
+      FileUtils.rm_rf(openiap_public_dir) if File.directory?(openiap_public_dir)
+      FileUtils.ln_s('../../Target Support Files/openiap', openiap_public_dir)
+    end
+    
+    # Suppress strict compiler warnings in pods
+    installer.pods_project.targets.each do |target|
+  target.build_configurations.each do |config|
+    config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.1'
+    config.build_settings['GCC_WARN_INHIBIT_ALL_WARNINGS'] = 'YES'
+    config.build_settings['CLANG_WARN_DOCUMENTATION_COMMENTS'] = 'NO'
+    config.build_settings['CLANG_ALLOW_NON_MODULAR_INCLUDES_IN_FRAMEWORK_MODULES'] = 'YES'
+    config.build_settings['CLANG_WARN_NON_MODULAR_INCLUDE_IN_FRAMEWORK_MODULE'] = 'NO'
+
+    if target.name == 'fmt'
+      definitions = config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] || ['$(inherited)']
+      definitions = [definitions] unless definitions.is_a?(Array)
+      definitions << 'FMT_USE_CONSTEVAL=0' unless definitions.include?('FMT_USE_CONSTEVAL=0')
+      config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] = definitions
+    end
+  end
+end
+
+    fmt_base_header = File.join(installer.sandbox.root, 'fmt', 'include', 'fmt', 'base.h')
+    if File.exist?(fmt_base_header)
+      File.chmod(0644, fmt_base_header) rescue nil
+      contents = File.read(fmt_base_header)
+      contents.gsub!(
+        "// Detect consteval, C++20 constexpr extensions and std::is_constant_evaluated.\n#if !defined(__cpp_lib_is_constant_evaluated)",
+        "// Detect consteval, C++20 constexpr extensions and std::is_constant_evaluated.\n#if defined(FMT_USE_CONSTEVAL)\n// Use the provided definition.\n#elif !defined(__cpp_lib_is_constant_evaluated)"
+      )
+      File.write(fmt_base_header, contents)
+    end
+  end
+end

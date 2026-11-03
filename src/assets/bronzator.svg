@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" id="bronzator">
+  <path fill="#ff5c7a" d="M18.375 10.5C20 9 20.5 7.512 20.5 5.923 20.5 3.481 18.485 1.5 16 1.5s-4.5 1.98-4.5 4.423c0 1.59.5 3.077 2.125 4.577z"></path>
+  <path fill="#647d92" d="M14.5 18.5h3v13h-3z"></path>
+  <path fill="#cad1d8" d="M13.5 10.5h5s-.954 2.933-.954 4.464c0 1.531-.046 3.536-.046 3.536h-2.937s-.027-2.192-.027-3.536c0-1.344-1.036-4.464-1.036-4.464z"></path>
+  <path fill="#ff819a" d="M16 1.5c-2.485 0-4.5 1.995-4.5 4.438 0 1.589.5 3.062 2.125 4.562H16"></path>
+  <path fill="none" stroke="#373449" stroke-linecap="round" stroke-linejoin="round" d="M18.375 10.5C20 9 20.5 7.512 20.5 5.923 20.5 3.481 18.485 1.5 16 1.5s-4.5 1.98-4.5 4.423c0 1.59.5 3.077 2.125 4.577z"></path>
+  <path fill="#7896af" d="M14.5 18.5v13H16v-13h-1.5z"></path>
+  <path fill="none" stroke="#373449" stroke-linecap="round" stroke-linejoin="round" d="M14.5 18.5h3v13h-3z"></path>
+  <path fill="#f1f5f5" d="M13.5 10.5s1.031 3.125 1.031 4.469c0 1.344.031 3.531.031 3.531H16s-.031-2.187-.031-3.531c0-1.344.031-4.469.031-4.469z"></path>
+  <path fill="none" stroke="#373449" stroke-linecap="round" stroke-linejoin="round" d="M13.5 10.5h5s-.998 2.933-.998 4.464L17.5 18.5h-2.982s-.026-2.192-.026-3.536c0-1.344-.992-4.464-.992-4.464z"></path>
+</svg>
