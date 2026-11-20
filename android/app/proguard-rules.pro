@@ -19,3 +19,18 @@
 -dontwarn com.facebook.**
 -keepattributes Signature
 -keepattributes *Annotation*
+
+# react-native-iap and Nitro Modules ProGuard rules
+-keep class com.dooboolab.rniap.** { *; }
+-dontwarn com.dooboolab.rniap.**
+
+-keep class com.margelo.nitro.** { *; }
+-dontwarn com.margelo.nitro.**
+
+-keep class dev.hyo.openiap.** { *; }
+-dontwarn dev.hyo.openiap.**
+
+-keep class com.android.billingclient.** { *; }
+-dontwarn com.android.billingclient.**
+
+

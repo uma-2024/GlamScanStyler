@@ -15,6 +15,7 @@ import Icon from 'react-native-vector-icons/MaterialIcons';
 import LinearGradient from '../components/AppLinearGradient';
 import { API_BASE_URL_WITH_API } from '../config/api';
 import { toCloudFrontUrl } from '../utils/cdnUrl';
+import { logMetaViewContent } from '../services/metaTracking';
 
 interface BookingDetailsScreenProps {
   bookingId: string;
@@ -142,6 +143,18 @@ const BookingDetailsScreen: React.FC<BookingDetailsScreenProps> = ({
       return 'Address not available';
     }
   };
+  useEffect(() => {
+    if (booking?.bookingId) {
+      logMetaViewContent({
+        content_id: booking.bookingId,
+        content_type: 'service_booking',
+        content_name: booking.serviceName || 'Service Booking',
+        currency: 'INR',
+        valueToSum: typeof booking.price === 'number' ? booking.price : undefined,
+      });
+    }
+  }, [booking?.bookingId, booking?.serviceName, booking?.price]);
+
   useEffect(() => {
     Animated.loop(
       Animated.sequence([

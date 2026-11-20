@@ -21,6 +21,7 @@ import { useModal } from '../hooks/useModal';
 import LinearGradient from '../components/AppLinearGradient';
 import { toCloudFrontUrl } from '../utils/cdnUrl';
 import SmoothToggle from '../components/SmoothToggle';
+import { logMetaViewContent } from '../services/metaTracking';
 
 interface MyServiceScreenProps {
   userId?: string;
@@ -1365,6 +1366,13 @@ const MyServiceScreen: React.FC<MyServiceScreenProps> = ({ userId, onBack, onDat
     setSelectedSubcategory(subcategory);
     setSelectedAddCategoryFilter(subcategory.categoryName);
 
+    // Meta App Event: View Content (Category)
+    logMetaViewContent({
+      content_id: subcategory.categoryId || subcategory._id || subcategory.categoryName,
+      content_type: 'service_category',
+      content_name: subcategory.categoryName,
+    });
+
     // Fetch services for this category
     fetchServicesByCategory(subcategory.categoryId);
 
@@ -1383,6 +1391,13 @@ const MyServiceScreen: React.FC<MyServiceScreenProps> = ({ userId, onBack, onDat
     const normalizedServiceTypes = normalizeServiceTypes(service);
     const normalizedGenders = normalizeGenders(service);
     const selectedServiceName = getServiceName(service);
+
+    // Meta App Event: View Content (Service)
+    logMetaViewContent({
+      content_id: service.serviceId || service._id || selectedServiceName,
+      content_type: 'salon_service',
+      content_name: selectedServiceName,
+    });
 
     // Use serviceId from API response (this is the correct field to save)
     setPendingServiceId(service.serviceId);

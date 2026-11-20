@@ -122,6 +122,6 @@
 	<key>FacebookAdvertiserIDCollectionEnabled</key>
 	<false/>
 	<key>NSUserTrackingUsageDescription</key>
-	<string>This identifier will be used to deliver personalised ads to you.</string>
+	<string>Your data will be used to measure advertising effectiveness and provide personalized promotions and service opportunities.</string>
 </dict>
 </plist>

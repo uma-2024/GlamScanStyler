@@ -55,6 +55,7 @@ import PaymentsScreen from './src/pages/PaymentsScreen';
 import BottomNavigation from './src/components/BottomNavigation';
 import CustomModal from './src/components/CustomModal';
 import GlobalPendingBookingModal from './src/components/GlobalPendingBookingModal';
+import GlobalRescheduleModal from './src/components/GlobalRescheduleModal';
 import { initializeFCM } from './src/services/fcmService';
 import { initializeMetaTracking, logMetaEvent } from './src/services/metaTracking';
 import { getAnalyticsConsent, setAnalyticsConsent } from './src/utils/authStorage';
@@ -203,6 +204,22 @@ function App() {
           counterpartName: data.counterpartName ? String(data.counterpartName) : undefined,
           serviceName: data.serviceName ? String(data.serviceName) : undefined,
         });
+      }
+    });
+    return () => sub.remove();
+  }, []);
+
+  useEffect(() => {
+    const sub = DeviceEventEmitter.addListener('open_upcoming_booking', (data: {
+      bookingId: string;
+    }) => {
+      if (data?.bookingId) {
+        setDirectChatBooking(null);
+        setCurrentScreen('bookings');
+        setActiveTab('bookings');
+        setTimeout(() => {
+          DeviceEventEmitter.emit('select_booking', { bookingId: data.bookingId });
+        }, 150);
       }
     });
     return () => sub.remove();
@@ -1951,45 +1968,49 @@ function App() {
           }}
         />
       ) : currentScreen === 'subscription' ? (
-        <SubscriptionScreen
-          stylistId={currentUserId}
-          onSubscriptionActivated={() => invalidateStylistAccountQueries(currentUserId)}
-          onBack={() => {
-            // Use navigation history for back button
-            if (navigationHistory.current.length > 1) {
-              navigationHistory.current.pop();
-              const prevScreen = navigationHistory.current[navigationHistory.current.length - 1];
-              if (prevScreen) {
-                setCurrentScreen(prevScreen as any);
+        <AppErrorBoundary>
+          <SubscriptionScreen
+            stylistId={currentUserId}
+            onSubscriptionActivated={() => invalidateStylistAccountQueries(currentUserId)}
+            onBack={() => {
+              // Use navigation history for back button
+              if (navigationHistory.current.length > 1) {
+                navigationHistory.current.pop();
+                const prevScreen = navigationHistory.current[navigationHistory.current.length - 1];
+                if (prevScreen) {
+                  setCurrentScreen(prevScreen as any);
+                } else {
+                  setCurrentScreen('account');
+                }
               } else {
                 setCurrentScreen('account');
               }
-            } else {
-              setCurrentScreen('account');
-            }
-          }}
-        />
+            }}
+          />
+        </AppErrorBoundary>
       ) : currentScreen === 'ads' ? (
-        <AdsScreen
-          userId={currentUserId}
-          onAnalytics={() => {
-            setCurrentScreen('analytics');
-          }}
-          onBack={() => {
-            // Use navigation history for back button
-            if (navigationHistory.current.length > 1) {
-              navigationHistory.current.pop();
-              const prevScreen = navigationHistory.current[navigationHistory.current.length - 1];
-              if (prevScreen) {
-                setCurrentScreen(prevScreen as any);
+        <AppErrorBoundary>
+          <AdsScreen
+            userId={currentUserId}
+            onAnalytics={() => {
+              setCurrentScreen('analytics');
+            }}
+            onBack={() => {
+              // Use navigation history for back button
+              if (navigationHistory.current.length > 1) {
+                navigationHistory.current.pop();
+                const prevScreen = navigationHistory.current[navigationHistory.current.length - 1];
+                if (prevScreen) {
+                  setCurrentScreen(prevScreen as any);
+                } else {
+                  setCurrentScreen('account');
+                }
               } else {
                 setCurrentScreen('account');
               }
-            } else {
-              setCurrentScreen('account');
-            }
-          }}
-        />
+            }}
+          />
+        </AppErrorBoundary>
       ) : currentScreen === 'analytics' ? (
         <AnalyticsScreen
           userId={currentUserId}
@@ -2060,6 +2081,11 @@ function App() {
       )}
 
       <GlobalPendingBookingModal
+        stylistId={currentUserId}
+        enabled={!!currentUserId && currentScreen !== 'loginSignup' && currentScreen !== 'login' && !displayWelcomeModal}
+      />
+
+      <GlobalRescheduleModal
         stylistId={currentUserId}
         enabled={!!currentUserId && currentScreen !== 'loginSignup' && currentScreen !== 'login' && !displayWelcomeModal}
       />

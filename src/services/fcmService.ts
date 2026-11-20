@@ -59,6 +59,14 @@ export const initializeFCM = (userId?: string): (() => void) => {
           counterpartName: data.counterpartName ? String(data.counterpartName) : undefined,
           serviceName: data.serviceName ? String(data.serviceName) : undefined,
         });
+      } else if (String(data?.type || '').startsWith('reschedule_') && data?.bookingId) {
+        const { DeviceEventEmitter } = require('react-native');
+        DeviceEventEmitter.emit('open_upcoming_booking', {
+          bookingId: String(data.bookingId),
+        });
+        DeviceEventEmitter.emit('select_booking', {
+          bookingId: String(data.bookingId),
+        });
       }
     };
 
@@ -66,6 +74,12 @@ export const initializeFCM = (userId?: string): (() => void) => {
     // permission nor a slow registration disables foreground booking popups.
     subscriptions.push(client.onMessage(async (message: FirebaseMessagingTypes.RemoteMessage) => {
       if (disposed) return;
+      const type = String(message.data?.type || '');
+      if (type.startsWith('reschedule_')) {
+        const { DeviceEventEmitter } = require('react-native');
+        DeviceEventEmitter.emit('global_reschedule_modal', message.data);
+        DeviceEventEmitter.emit('reschedule_update', message.data);
+      }
       await displayNotification(
         String(message.notification?.title || message.data?.title || 'New notification'),
         String(message.notification?.body || message.data?.body || ''),

@@ -16,6 +16,7 @@ import Icon from 'react-native-vector-icons/MaterialIcons';
 import LinearGradient from '../components/AppLinearGradient';
 import { API_BASE_URL_WITH_API } from '../config/api';
 import { toCloudFrontUrl } from '../utils/cdnUrl';
+import { logMetaRate } from '../services/metaTracking';
 
 const DEFAULT_SERVICE_IMAGE_SOURCE = require('../assets/image.png');
 
@@ -158,6 +159,16 @@ const CompletedBookingDetailsScreen: React.FC<
 
     setRating(customerRatingOfStylist);
     setRatingComment(customerComment);
+
+    if (customerRatingOfStylist > 0 && booking?.bookingId) {
+      logMetaRate({
+        ratingValue: customerRatingOfStylist,
+        maxRatingValue: 5,
+        content_id: booking.bookingId,
+        content_type: 'service_booking',
+        service_name: booking.serviceName,
+      });
+    }
   }, [booking]);
 
   useEffect(() => {

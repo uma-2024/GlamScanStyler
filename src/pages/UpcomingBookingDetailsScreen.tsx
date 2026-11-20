@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -6,12 +6,20 @@ import {
   ScrollView,
   TouchableOpacity,
   Image,
+  Alert,
+  ActivityIndicator,
+  DeviceEventEmitter,
 } from 'react-native';
 import SafeAreaView from '../components/SafeAreaView';
 import { compactTopPadding } from '../utils/responsiveLayout';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import EvilIcon from 'react-native-vector-icons/EvilIcons';
 import { toCloudFrontUrl } from '../utils/cdnUrl';
+import { getApiBaseUrl } from '../config/api';
+import { getLoginSession } from '../utils/authStorage';
+import RescheduleModal from '../components/RescheduleModal';
+import { useModal } from '../hooks/useModal';
+import CustomModal from '../components/CustomModal';
 
 interface Booking {
   bookingId: string;
@@ -24,6 +32,24 @@ interface Booking {
   period: string;
   price: number;
   status: 'pending' | 'confirmed' | 'ongoing' | 'completed' | 'cancelled';
+  canReschedule?: boolean;
+  rescheduleRequest?: {
+    status: 'pending' | 'accepted' | 'declined' | 'cancelled';
+    initiatedBy: 'user' | 'stylist';
+    currentProposal: {
+      date: string;
+      startTime: string;
+      endTime: string;
+      period: 'Am' | 'Pm' | 'AM' | 'PM' | string;
+      reason?: string;
+      proposedBy: 'user' | 'stylist';
+      proposedAt: string;
+    };
+    history?: any[];
+    resolvedAt?: string;
+    resolvedBy?: string;
+    declineReason?: string;
+  };
   serviceImages?: { [key: string]: string }; // Object with gender keys and image values
   salonLocation?: {
     address?: string;
@@ -109,19 +135,305 @@ const getServiceImageForBooking = (booking: Booking, defaultImage: string = 'htt
 interface UpcomingBookingDetailsScreenProps {
   booking: Booking;
   userImage?: string | null;
+  stylistId?: string;
   onBack: () => void;
   onHelp?: () => void;
   onOpenChat?: () => void;
+  onBookingUpdated?: () => void;
 }
 
 const UpcomingBookingDetailsScreen: React.FC<UpcomingBookingDetailsScreenProps> = ({
   booking,
   userImage,
+  stylistId,
   onBack,
   onHelp,
   onOpenChat,
+  onBookingUpdated,
 }) => {
+  const modal = useModal();
   const [addressExpanded, setAddressExpanded] = useState(true);
+  const [currentBooking, setCurrentBooking] = useState<Booking>(booking);
+  const [showRescheduleModal, setShowRescheduleModal] = useState(false);
+  const [rescheduleModalMode, setRescheduleModalMode] = useState<'request' | 'counter'>('request');
+  const [isRespondingReschedule, setIsRespondingReschedule] = useState(false);
+
+  useEffect(() => {
+    setCurrentBooking(booking);
+  }, [booking]);
+
+  // Real-time polling & notification listener for booking reschedule updates
+  useEffect(() => {
+    let isMounted = true;
+    const fetchLatestBookingStatus = async () => {
+      try {
+        const session = await getLoginSession();
+        const token = session?.loginId;
+        const baseUrl = getApiBaseUrl(true);
+        const res = await fetch(
+          `${baseUrl}/bookings/${currentBooking.bookingId}/reschedule`,
+          {
+            headers: {
+              Accept: 'application/json',
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+          }
+        );
+        const json = await res.json();
+        if (isMounted && json.success && json.data) {
+          const freshData = json.data;
+          const freshBooking = freshData.booking;
+          setCurrentBooking(prev => {
+            if (freshBooking) {
+              const prevReq = JSON.stringify(prev.rescheduleRequest);
+              const nextReq = JSON.stringify(freshBooking.rescheduleRequest);
+              if (
+                prevReq !== nextReq ||
+                prev.status !== freshBooking.status ||
+                prev.date !== freshBooking.date ||
+                prev.startTime !== freshBooking.startTime
+              ) {
+                return { ...prev, ...freshBooking };
+              }
+            } else if (freshData.rescheduleRequest !== undefined) {
+              const prevReq = JSON.stringify(prev.rescheduleRequest);
+              const nextReq = JSON.stringify(freshData.rescheduleRequest);
+              if (
+                prevReq !== nextReq ||
+                prev.status !== freshData.status ||
+                (freshData.currentBooking &&
+                  (prev.date !== freshData.currentBooking.date ||
+                    prev.startTime !== freshData.currentBooking.startTime))
+              ) {
+                return {
+                  ...prev,
+                  status: freshData.status || prev.status,
+                  date: freshData.currentBooking?.date || prev.date,
+                  startTime: freshData.currentBooking?.startTime || prev.startTime,
+                  endTime: freshData.currentBooking?.endTime || prev.endTime,
+                  period: freshData.currentBooking?.period || prev.period,
+                  rescheduleRequest: freshData.rescheduleRequest,
+                };
+              }
+            }
+            return prev;
+          });
+        }
+      } catch (e) {
+        // Silent poll
+      }
+    };
+
+    fetchLatestBookingStatus();
+    const pollInterval = setInterval(fetchLatestBookingStatus, 3500);
+
+    const sub = DeviceEventEmitter.addListener('reschedule_update', (eventData: any) => {
+      if (!eventData || !eventData.bookingId || eventData.bookingId === currentBooking.bookingId) {
+        fetchLatestBookingStatus();
+      }
+    });
+
+    return () => {
+      isMounted = false;
+      clearInterval(pollInterval);
+      sub.remove();
+    };
+  }, [currentBooking.bookingId]);
+
+  const getBookingStartDateTime = (b: Booking): Date | null => {
+    try {
+      let bookingDate: Date;
+      if (typeof b.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(b.date)) {
+        const [year, month, day] = b.date.split('-').map(Number);
+        bookingDate = new Date(year, month - 1, day);
+      } else {
+        const parsed = new Date(b.date);
+        if (isNaN(parsed.getTime())) return null;
+        bookingDate = new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
+      }
+
+      const [rawHours, rawMinutes] = (b.startTime || '').split(':').map(Number);
+      if (isNaN(rawHours) || isNaN(rawMinutes)) return null;
+
+      let hour24 = rawHours;
+      const periodUpper = (b.period || '').toUpperCase().trim();
+      if (periodUpper === 'PM' && rawHours < 12) {
+        hour24 = rawHours + 12;
+      } else if (periodUpper === 'AM' && rawHours === 12) {
+        hour24 = 0;
+      }
+
+      if (hour24 < 0 || hour24 > 23 || rawMinutes < 0 || rawMinutes > 59) return null;
+
+      const bookingStart = new Date(bookingDate);
+      bookingStart.setHours(hour24, rawMinutes, 0, 0);
+      return bookingStart;
+    } catch {
+      return null;
+    }
+  };
+
+  const canRescheduleBooking = (): boolean => {
+    try {
+      if (!['confirmed', 'pending'].includes(currentBooking.status)) return false;
+      const bookingStart = getBookingStartDateTime(currentBooking);
+      if (!bookingStart) return false;
+
+      const twoHoursBefore = new Date(bookingStart.getTime() - 2 * 60 * 60 * 1000);
+      return new Date() < twoHoursBefore;
+    } catch {
+      return false;
+    }
+  };
+
+  const handleAcceptReschedule = () => {
+    const proposal = currentBooking.rescheduleRequest?.currentProposal;
+    if (!proposal) return;
+
+    modal.showConfirm(
+      'Confirm Reschedule',
+      `Accept customer's proposed appointment time:\n${proposal.date} at ${proposal.startTime} ${proposal.period}?`,
+      async () => {
+        setIsRespondingReschedule(true);
+        try {
+          const session = await getLoginSession();
+          const token = session?.loginId;
+          const effectiveStylistId = stylistId || session?.userId;
+          const baseUrl = getApiBaseUrl(true);
+          const res = await fetch(
+            `${baseUrl}/bookings/${currentBooking.bookingId}/reschedule/respond`,
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+                ...(token ? { Authorization: `Bearer ${token}` } : {}),
+              },
+              body: JSON.stringify({
+                action: 'accept',
+                respondedBy: 'stylist',
+                stylistId: effectiveStylistId,
+              }),
+            }
+          );
+          const data = await res.json();
+          if (!res.ok || !data.success) {
+            throw new Error(data.message || 'Failed to accept reschedule');
+          }
+          modal.showAlert('Rescheduled! 🗓️', 'Appointment moved to the new date and time successfully.', 'success');
+          if (data.data) {
+            setCurrentBooking(data.data);
+          }
+          DeviceEventEmitter.emit('reschedule_update', { bookingId: currentBooking.bookingId });
+          if (onBookingUpdated) {
+            onBookingUpdated();
+          }
+        } catch (err: any) {
+          modal.showAlert('Error', err.message || 'Failed to accept reschedule.', 'error');
+        } finally {
+          setIsRespondingReschedule(false);
+        }
+      },
+      undefined,
+      'Accept',
+      'Cancel'
+    );
+  };
+
+  const handleDeclineReschedule = () => {
+    modal.showConfirm(
+      'Decline Reschedule',
+      'Are you sure you want to decline? The appointment will remain at its current scheduled time.',
+      async () => {
+        setIsRespondingReschedule(true);
+        try {
+          const session = await getLoginSession();
+          const token = session?.loginId;
+          const effectiveStylistId = stylistId || session?.userId;
+          const baseUrl = getApiBaseUrl(true);
+          const res = await fetch(
+            `${baseUrl}/bookings/${currentBooking.bookingId}/reschedule/respond`,
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+                ...(token ? { Authorization: `Bearer ${token}` } : {}),
+              },
+              body: JSON.stringify({
+                action: 'decline',
+                respondedBy: 'stylist',
+                stylistId: effectiveStylistId,
+              }),
+            }
+          );
+          const data = await res.json();
+          if (!res.ok || !data.success) {
+            throw new Error(data.message || 'Failed to decline reschedule');
+          }
+          modal.showAlert('Declined', 'Reschedule proposal declined. Original slot retained.', 'info');
+          if (data.data) {
+            setCurrentBooking(data.data);
+          }
+          DeviceEventEmitter.emit('reschedule_update', { bookingId: currentBooking.bookingId });
+        } catch (err: any) {
+          modal.showAlert('Error', err.message || 'Could not decline reschedule.', 'error');
+        } finally {
+          setIsRespondingReschedule(false);
+        }
+      },
+      undefined,
+      'Decline',
+      'Keep Request'
+    );
+  };
+
+  const handleCancelPendingReschedule = () => {
+    modal.showConfirm(
+      'Withdraw Request',
+      'Do you want to cancel your pending reschedule request?',
+      async () => {
+        setIsRespondingReschedule(true);
+        try {
+          const session = await getLoginSession();
+          const token = session?.loginId;
+          const effectiveStylistId = stylistId || session?.userId;
+          const baseUrl = getApiBaseUrl(true);
+          const res = await fetch(
+            `${baseUrl}/bookings/${currentBooking.bookingId}/reschedule/cancel`,
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+                ...(token ? { Authorization: `Bearer ${token}` } : {}),
+              },
+              body: JSON.stringify({
+                cancelledBy: 'stylist',
+                stylistId: effectiveStylistId,
+              }),
+            }
+          );
+          const data = await res.json();
+          if (!res.ok || !data.success) {
+            throw new Error(data.message || 'Failed to cancel request');
+          }
+          modal.showAlert('Withdrawn', 'Your reschedule request has been cancelled.', 'info');
+          if (data.data) {
+            setCurrentBooking(data.data);
+          }
+          DeviceEventEmitter.emit('reschedule_update', { bookingId: currentBooking.bookingId });
+        } catch (err: any) {
+          modal.showAlert('Error', err.message || 'Failed to cancel request.', 'error');
+        } finally {
+          setIsRespondingReschedule(false);
+        }
+      },
+      undefined,
+      'Yes, Withdraw',
+      'No'
+    );
+  };
 
   // Format date and time
   const formatDateAndTime = (date: string, startTime: string, period: string): string => {
@@ -187,6 +499,101 @@ const UpcomingBookingDetailsScreen: React.FC<UpcomingBookingDetailsScreenProps> 
       </View>
 
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={true}>
+        {/* Reschedule Request Banner */}
+        {currentBooking.rescheduleRequest && currentBooking.rescheduleRequest.status === 'pending' && (
+          <View style={styles.rescheduleBanner}>
+            <View style={styles.rescheduleBannerHeader}>
+              <View style={styles.rescheduleBannerIconBox}>
+                <Icon name="event-repeat" size={24} color="#E65100" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.rescheduleBannerTitle}>
+                  {currentBooking.rescheduleRequest.currentProposal.proposedBy === 'user'
+                    ? `${currentBooking.userName || 'Client'} Requested Reschedule`
+                    : 'Reschedule Request Pending'}
+                </Text>
+                <Text style={styles.rescheduleBannerSubtitle}>
+                  {currentBooking.rescheduleRequest.currentProposal.proposedBy === 'user'
+                    ? 'Customer requested to change the appointment time:'
+                    : 'You requested to change the appointment time to:'}
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.proposedSlotCard}>
+              <View style={styles.proposedSlotRow}>
+                <Icon name="today" size={18} color="#E65100" />
+                <Text style={styles.proposedSlotText}>
+                  {currentBooking.rescheduleRequest.currentProposal.date}
+                </Text>
+              </View>
+              <View style={styles.proposedSlotRow}>
+                <Icon name="access-time" size={18} color="#E65100" />
+                <Text style={styles.proposedSlotTime}>
+                  {currentBooking.rescheduleRequest.currentProposal.startTime} {currentBooking.rescheduleRequest.currentProposal.period} - {currentBooking.rescheduleRequest.currentProposal.endTime} {currentBooking.rescheduleRequest.currentProposal.period}
+                </Text>
+              </View>
+              {currentBooking.rescheduleRequest.currentProposal.reason ? (
+                <Text style={styles.proposedReasonText}>
+                  "{currentBooking.rescheduleRequest.currentProposal.reason}"
+                </Text>
+              ) : null}
+            </View>
+
+            {currentBooking.rescheduleRequest.currentProposal.proposedBy === 'user' ? (
+              <View style={styles.rescheduleActionsRow}>
+                <TouchableOpacity
+                  style={[styles.rescheduleActionBtn, styles.acceptBtn]}
+                  onPress={handleAcceptReschedule}
+                  disabled={isRespondingReschedule}
+                  activeOpacity={0.8}
+                >
+                  {isRespondingReschedule ? (
+                    <ActivityIndicator color="#fff" size="small" />
+                  ) : (
+                    <>
+                      <Icon name="check" size={18} color="#fff" />
+                      <Text style={styles.acceptBtnText}>Accept</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.rescheduleActionBtn, styles.counterBtn]}
+                  onPress={() => {
+                    setRescheduleModalMode('counter');
+                    setShowRescheduleModal(true);
+                  }}
+                  disabled={isRespondingReschedule}
+                  activeOpacity={0.8}
+                >
+                  <Icon name="edit-calendar" size={18} color="#FD8B36" />
+                  <Text style={styles.counterBtnText}>Choose Other</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.rescheduleActionBtn, styles.declineBtn]}
+                  onPress={handleDeclineReschedule}
+                  disabled={isRespondingReschedule}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.declineBtnText}>Decline</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <View style={{ alignItems: 'flex-end', marginTop: 8 }}>
+                <TouchableOpacity
+                  style={styles.withdrawBtn}
+                  onPress={handleCancelPendingReschedule}
+                  disabled={isRespondingReschedule}
+                >
+                  <Text style={styles.withdrawBtnText}>Withdraw Request</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
+        )}
+
         {/* First Card - Booking Details */}
         <View style={styles.bookingCard}>
           {/* Date and Time */}
@@ -390,6 +797,21 @@ const UpcomingBookingDetailsScreen: React.FC<UpcomingBookingDetailsScreenProps> 
           </View>
         )}
 
+        {/* Reschedule Button - Only show if >= 2 hours before start and no active pending reschedule */}
+        {canRescheduleBooking() &&
+          (!currentBooking.rescheduleRequest || currentBooking.rescheduleRequest.status !== 'pending') && (
+            <TouchableOpacity
+              style={styles.rescheduleButton}
+              activeOpacity={0.7}
+              onPress={() => {
+                setRescheduleModalMode('request');
+                setShowRescheduleModal(true);
+              }}>
+              <Icon name="event-repeat" size={20} color="#fff" />
+              <Text style={styles.rescheduleButtonText}>Reschedule Appointment</Text>
+            </TouchableOpacity>
+          )}
+
         <TouchableOpacity
           style={styles.chatSection}
           activeOpacity={0.7}
@@ -419,6 +841,34 @@ const UpcomingBookingDetailsScreen: React.FC<UpcomingBookingDetailsScreenProps> 
           <Icon name="chevron-right" size={24} color="#FD8B36" />
         </TouchableOpacity>
       </ScrollView>
+
+      <RescheduleModal
+        visible={showRescheduleModal}
+        onClose={() => setShowRescheduleModal(false)}
+        bookingId={currentBooking.bookingId}
+        stylistId={stylistId || (currentBooking as any).stylistId || ''}
+        userName={currentBooking.userName}
+        mode={rescheduleModalMode}
+        role="stylist"
+        onSuccess={(updatedBooking) => {
+          if (updatedBooking) {
+            setCurrentBooking(updatedBooking);
+          }
+          DeviceEventEmitter.emit('reschedule_update', { bookingId: currentBooking.bookingId });
+          if (onBookingUpdated) {
+            onBookingUpdated();
+          }
+        }}
+      />
+
+      <CustomModal
+        visible={modal.visible}
+        title={modal.title}
+        message={modal.message}
+        type={modal.type}
+        buttons={modal.buttons}
+        onClose={modal.hideModal}
+      />
     </SafeAreaView>
   );
 };
@@ -683,6 +1133,149 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#666',
     lineHeight: 18,
+  },
+  rescheduleBanner: {
+    backgroundColor: '#FFF8F2',
+    borderWidth: 1.5,
+    borderColor: '#FFD3B5',
+    borderRadius: 16,
+    padding: 16,
+    marginHorizontal: 16,
+    marginTop: 16,
+    marginBottom: 12,
+    shadowColor: '#FD8B36',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  rescheduleBannerHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 12,
+  },
+  rescheduleBannerIconBox: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#FFE5D0',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  rescheduleBannerTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#2F241D',
+  },
+  rescheduleBannerSubtitle: {
+    fontSize: 12,
+    color: '#7A6758',
+    marginTop: 2,
+  },
+  proposedSlotCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#F0E5DC',
+    gap: 6,
+  },
+  proposedSlotRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  proposedSlotText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#2F241D',
+  },
+  proposedSlotTime: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#FD8B36',
+  },
+  proposedReasonText: {
+    fontSize: 12,
+    fontStyle: 'italic',
+    color: '#666',
+    marginTop: 4,
+  },
+  rescheduleActionsRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 12,
+  },
+  rescheduleActionBtn: {
+    flex: 1,
+    height: 42,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 4,
+  },
+  acceptBtn: {
+    backgroundColor: '#2E7D32',
+  },
+  acceptBtnText: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: 13,
+  },
+  counterBtn: {
+    backgroundColor: '#FFF0E2',
+    borderWidth: 1,
+    borderColor: '#FD8B36',
+  },
+  counterBtnText: {
+    color: '#FD8B36',
+    fontWeight: '700',
+    fontSize: 12,
+  },
+  declineBtn: {
+    backgroundColor: '#FFEBEE',
+    borderWidth: 1,
+    borderColor: '#FFCDD2',
+    flex: 0.8,
+  },
+  declineBtnText: {
+    color: '#D32F2F',
+    fontWeight: '600',
+    fontSize: 12,
+  },
+  withdrawBtn: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+    backgroundColor: '#F5F5F5',
+  },
+  withdrawBtnText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#666',
+  },
+  rescheduleButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FD8B36',
+    borderRadius: 12,
+    padding: 16,
+    marginHorizontal: 16,
+    marginBottom: 12,
+    gap: 8,
+    shadowColor: '#FD8B36',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  rescheduleButtonText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#fff',
   },
   chatSection: {
     flexDirection: 'row',

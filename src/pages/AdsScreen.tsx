@@ -138,7 +138,7 @@ const AdsScreen: React.FC<AdsScreenProps> = ({ userId, onBack, onAnalytics }) =>
   // Google Play states
   const [playProducts, setPlayProducts] = useState<Product[]>([]);
   const [iapConnected, setIapConnected] = useState(false);
-  const [iapLoading, setIapLoading] = useState(Platform.OS === 'android');
+  const [iapLoading, setIapLoading] = useState(false);
 
   // Custom modal state (replaces Alert.alert)
   const [appModal, setAppModal] = useState<{
@@ -175,6 +175,8 @@ const AdsScreen: React.FC<AdsScreenProps> = ({ userId, onBack, onAnalytics }) =>
   const setHasPaidPromotionAccessRef = useRef<any>(null);
   const showAppModalRef = useRef<typeof showAppModal | null>(null);
   const closeAppModalRef = useRef<typeof closeAppModal | null>(null);
+  const purchaseUpdateSubRef = useRef<any>(null);
+  const purchaseErrorSubRef = useRef<any>(null);
 
   // Sync refs to avoid stale listener closure state
   useEffect(() => {
@@ -189,145 +191,160 @@ const AdsScreen: React.FC<AdsScreenProps> = ({ userId, onBack, onAnalytics }) =>
     closeAppModalRef.current = closeAppModal;
   });
 
-  // Initialise store connection and purchase listeners
-  useEffect(() => {
-    if (Platform.OS !== 'android' && Platform.OS !== 'ios') { return; }
+  // Lazy store connection — never connect to Google Play on screen mount
+  const ensureIapConnected = useCallback(async (): Promise<boolean> => {
+    if (Platform.OS !== 'android' && Platform.OS !== 'ios') { return false; }
+    if (iapConnected) { return true; }
 
-    let mounted = true;
-
-    const init = async () => {
-      try {
-        const connected = await initConnection();
-        if (!mounted) { return; }
-        setIapConnected(!!connected);
-        console.log('[IAP Ads] Billing connected:', !!connected);
-      } catch (e) {
-        console.error('[IAP Ads] initConnection failed:', e);
-        if (mounted) { setIapLoading(false); }
-      }
-    };
-
-    // Purchase update listener — handle one-time verify and finishTransaction (isConsumable: true)
-    const purchaseUpdateSub = purchaseUpdatedListener(async (purchase: Purchase) => {
-      const pid = (purchase as any).productId ?? purchase.productId ?? '';
-      let ptoken =
-        (purchase as any).transactionReceipt ??
-        (purchase as any).purchaseToken ??
-        (purchase as any).purchaseTokenAndroid ??
-        purchase.transactionId ??
-        '';
-
-      if (Platform.OS === 'ios' && (!ptoken || ptoken.length < 50)) {
+    try {
+      if (!purchaseUpdateSubRef.current) {
         try {
-          const iosReceipt = await getReceiptIOS();
-          if (iosReceipt) {
-            ptoken = iosReceipt;
-          }
+          purchaseUpdateSubRef.current = purchaseUpdatedListener(async (purchase: Purchase) => {
+            const pid = (purchase as any).productId ?? purchase.productId ?? '';
+            let ptoken =
+              (purchase as any).transactionReceipt ??
+              (purchase as any).purchaseToken ??
+              (purchase as any).purchaseTokenAndroid ??
+              purchase.transactionId ??
+              '';
+
+            if (Platform.OS === 'ios' && (!ptoken || ptoken.length < 50)) {
+              try {
+                const iosReceipt = await getReceiptIOS();
+                if (iosReceipt) {
+                  ptoken = iosReceipt;
+                }
+              } catch (e) {
+                console.warn('[IAP Ads] getReceiptIOS fallback warning:', e);
+              }
+            }
+
+            console.log('[IAP Ads] Purchase listener received event:', { pid, ptoken: ptoken ? ptoken.substring(0, 15) + '...' : 'none' });
+
+            if (!ptoken) {
+              console.warn('[IAP Ads] Purchase has no token, skipping backend verify');
+              return;
+            }
+
+            if (ANDROID_AD_SKUS.includes(pid) || IOS_AD_SKUS.includes(pid)) {
+              console.log('[IAP Ads] Processing campaign verify for SKU:', pid);
+              
+              let receiptData =
+                (purchase as any)?.transactionReceipt ||
+                (purchase as any)?.transactionId ||
+                ptoken;
+
+              if (Platform.OS === 'ios' && (!receiptData || receiptData.length < 50)) {
+                try {
+                  const fetchedReceipt = await getReceiptIOS();
+                  if (fetchedReceipt) {
+                    receiptData = fetchedReceipt;
+                  }
+                } catch (e) {
+                  console.warn('[IAP Ads] Could not fetch iOS receipt fallback:', e);
+                }
+              }
+
+              fetch(`${API_BASE_URL_WITH_API}/promotions/google-play/verify`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  stylistId: userIdRef.current,
+                  planId: selectedPlanRef.current?.id,
+                  planTitle: selectedPlanRef.current?.title,
+                  categories: selectedServiceCategoryNamesRef.current,
+                  services: selectedServicesListRef.current?.map((service: any) => ({
+                    serviceId: service.serviceId || service._id,
+                    serviceName: service.serviceName,
+                    category: service.category,
+                    amount: service.amount,
+                  })),
+                  serviceCount: pricingRef.current?.serviceCount,
+                  durationDays: selectedPlanRef.current?.durationDays,
+                  benefits: selectedPlanRef.current?.benefits,
+                  baseAmount: pricingRef.current?.base,
+                  gstAmount: pricingRef.current?.gstAmount,
+                  finalAmount: pricingRef.current?.finalAmount,
+                  productId: pid,
+                  purchaseToken: ptoken,
+                  transactionReceipt: receiptData,
+                  receiptData: receiptData,
+                  receipt: receiptData,
+                  transactionId: purchase.transactionId || ptoken,
+                  platform: Platform.OS,
+                }),
+              })
+                .then(async (res) => {
+                  const json = await res.json();
+                  if (!res.ok || !json?.success) {
+                    throw new Error(json?.message || 'Verification failed');
+                  }
+                  console.log('[IAP Ads] Verified successfully, consuming transaction...');
+                  return finishTransaction({ purchase, isConsumable: true });
+                })
+                .then(() => {
+                  console.log('[IAP Ads] Consumed transaction successfully.');
+                  showAppModalRef.current?.(
+                    'Campaign Activated',
+                    `${selectedPlanRef.current?.title || 'Your campaign'} is now live for ${pricingRef.current?.serviceCount || 0} services.`,
+                    'success',
+                    [{ text: 'OK', onPress: () => closeAppModalRef.current?.(), style: 'default', gradient: true }],
+                  );
+                  setHasPaidPromotionAccessRef.current?.(true);
+                })
+                .catch((err) => {
+                  console.error('[IAP Ads] Verification failed:', err);
+                  const rawMsg = err?.message || 'Could not verify purchase with backend.';
+                  const displayMsg = Platform.OS === 'ios' ? rawMsg.replace(/google\s*play/gi, 'App Store') : rawMsg;
+                  showAppModalRef.current?.('Verification Failed', displayMsg, 'error', [{ text: 'OK', onPress: () => closeAppModalRef.current?.(), style: 'default', gradient: true }]);
+                })
+                .finally(() => {
+                  setPaymentProcessingRef.current?.(false);
+                });
+            }
+          });
         } catch (e) {
-          console.warn('[IAP Ads] getReceiptIOS fallback warning:', e);
+          console.warn('[IAP Ads] purchaseUpdatedListener attach failed:', e);
         }
       }
 
-      console.log('[IAP Ads] Purchase listener received event:', { pid, ptoken: ptoken ? ptoken.substring(0, 15) + '...' : 'none' });
-
-      if (!ptoken) {
-        console.warn('[IAP Ads] Purchase has no token, skipping backend verify');
-        return;
-      }
-
-      // Check if this is an ad campaign product SKU (iOS or Android)
-      if (ANDROID_AD_SKUS.includes(pid) || IOS_AD_SKUS.includes(pid)) {
-        console.log('[IAP Ads] Processing campaign verify for SKU:', pid);
-        
-        let receiptData =
-          (purchase as any)?.transactionReceipt ||
-          (purchase as any)?.transactionId ||
-          ptoken;
-
-        if (Platform.OS === 'ios' && (!receiptData || receiptData.length < 50)) {
-          try {
-            const fetchedReceipt = await getReceiptIOS();
-            if (fetchedReceipt) {
-              receiptData = fetchedReceipt;
-            }
-          } catch (e) {
-            console.warn('[IAP Ads] Could not fetch iOS receipt fallback:', e);
-          }
-        }
-
-        fetch(`${API_BASE_URL_WITH_API}/promotions/google-play/verify`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            stylistId: userIdRef.current,
-            planId: selectedPlanRef.current?.id,
-            planTitle: selectedPlanRef.current?.title,
-            categories: selectedServiceCategoryNamesRef.current,
-            services: selectedServicesListRef.current?.map((service: any) => ({
-              serviceId: service.serviceId || service._id,
-              serviceName: service.serviceName,
-              category: service.category,
-              amount: service.amount,
-            })),
-            serviceCount: pricingRef.current?.serviceCount,
-            durationDays: selectedPlanRef.current?.durationDays,
-            benefits: selectedPlanRef.current?.benefits,
-            baseAmount: pricingRef.current?.base,
-            gstAmount: pricingRef.current?.gstAmount,
-            finalAmount: pricingRef.current?.finalAmount,
-            productId: pid,
-            purchaseToken: ptoken,
-            transactionReceipt: receiptData,
-            receiptData: receiptData,
-            receipt: receiptData,
-            transactionId: purchase.transactionId || ptoken,
-            platform: Platform.OS,
-          }),
-        })
-          .then(async (res) => {
-            const json = await res.json();
-            if (!res.ok || !json?.success) {
-              throw new Error(json?.message || 'Verification failed');
-            }
-            console.log('[IAP Ads] Verified successfully, consuming transaction...');
-            return finishTransaction({ purchase, isConsumable: true });
-          })
-          .then(() => {
-            console.log('[IAP Ads] Consumed transaction successfully.');
-            showAppModalRef.current?.(
-              'Campaign Activated',
-              `${selectedPlanRef.current?.title || 'Your campaign'} is now live for ${pricingRef.current?.serviceCount || 0} services.`,
-              'success',
-              [{ text: 'OK', onPress: () => closeAppModalRef.current?.(), style: 'default', gradient: true }],
-            );
-            setHasPaidPromotionAccessRef.current?.(true);
-          })
-          .catch((err) => {
-            console.error('[IAP Ads] Verification failed:', err);
-            const rawMsg = err?.message || 'Could not verify purchase with backend.';
-            const displayMsg = Platform.OS === 'ios' ? rawMsg.replace(/google\s*play/gi, 'App Store') : rawMsg;
-            showAppModalRef.current?.('Verification Failed', displayMsg, 'error', [{ text: 'OK', onPress: () => closeAppModalRef.current?.(), style: 'default', gradient: true }]);
-          })
-          .finally(() => {
+      if (!purchaseErrorSubRef.current) {
+        try {
+          purchaseErrorSubRef.current = purchaseErrorListener((err: PurchaseError) => {
+            console.error('[IAP Ads] Purchase error event:', err?.code, err?.message);
             setPaymentProcessingRef.current?.(false);
           });
+        } catch (e) {
+          console.warn('[IAP Ads] purchaseErrorListener attach failed:', e);
+        }
       }
-    });
 
-    const purchaseErrorSub = purchaseErrorListener((err: PurchaseError) => {
-      console.error('[IAP Ads] Purchase error event:', err.code, err.message);
-      setPaymentProcessingRef.current?.(false);
-    });
+      const connected = await initConnection();
+      setIapConnected(!!connected);
+      return !!connected;
+    } catch (e) {
+      console.warn('[IAP Ads] ensureIapConnected failed:', e);
+      setIapConnected(false);
+      return false;
+    }
+  }, [iapConnected]);
 
-    init();
-
+  // Clean up listeners on unmount
+  useEffect(() => {
     return () => {
-      mounted = false;
-      purchaseUpdateSub?.remove();
-      purchaseErrorSub?.remove();
-      endConnection().catch(() => {});
+      try {
+        purchaseUpdateSubRef.current?.remove();
+        purchaseUpdateSubRef.current = null;
+      } catch (e) {}
+      try {
+        purchaseErrorSubRef.current?.remove();
+        purchaseErrorSubRef.current = null;
+      } catch (e) {}
+      try {
+        endConnection().catch(() => {});
+      } catch (e) {}
     };
   }, []);
 
@@ -783,14 +800,9 @@ const AdsScreen: React.FC<AdsScreenProps> = ({ userId, onBack, onAnalytics }) =>
 
   // Store billing purchase handler for ad campaigns
   const purchaseStoreAdCampaign = useCallback(async (sku: string) => {
-    if (!iapConnected) {
+    const connected = await ensureIapConnected();
+    if (!connected) {
       showAppModal('Store unavailable', 'The in-app purchase system is not ready. Please try again later.', 'warning', [{ text: 'OK', onPress: closeAppModal, style: 'default', gradient: true }]);
-      return;
-    }
-
-    const product = playProducts.find(p => ((p as any).id ?? (p as any).productId) === sku);
-    if (!product) {
-      showAppModal('Product unavailable', 'This campaign product is not configured in the app store catalog.', 'warning', [{ text: 'OK', onPress: closeAppModal, style: 'default', gradient: true }]);
       return;
     }
 
@@ -831,7 +843,7 @@ const AdsScreen: React.FC<AdsScreenProps> = ({ userId, onBack, onAnalytics }) =>
       showAppModal('Payment Failed', e instanceof Error ? e.message : 'Store purchase failed. Please try again.', 'error', [{ text: 'OK', onPress: closeAppModal, style: 'default', gradient: true }]);
       setPaymentProcessing(false);
     }
-  }, [iapConnected, playProducts]);
+  }, [ensureIapConnected, showAppModal, closeAppModal]);
 
   const openRazorpayPayment = useCallback((orderId: string, amount: number) => {
     try {

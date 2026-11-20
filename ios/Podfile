@@ -13,6 +13,7 @@ node_modules_path = '../node_modules'
 require_relative "#{node_modules_path}/react-native-permissions/scripts/setup"
 
 setup_permissions([
+  'AppTrackingTransparency',
   'Camera',
   'LocationWhenInUse',
   'PhotoLibrary',

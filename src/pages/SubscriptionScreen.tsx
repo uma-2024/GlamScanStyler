@@ -65,6 +65,12 @@ import {
   getSubscriptionSkus,
   getStoreProductId,
 } from '../constants/subscriptions';
+import {
+  logMetaSubscribe,
+  logMetaInitiateCheckout,
+  logMetaStartTrial,
+  logMetaPurchase,
+} from '../services/metaTracking';
 
 // ─── Theme ───────────────────────────────────────────────────────────────────
 const PRIMARY_COLOR = '#FD8B36';
@@ -230,7 +236,7 @@ const SubscriptionScreen: React.FC<SubscriptionScreenProps> = ({
   // Google Play data
   const [playProducts, setPlayProducts] = useState<ProductSubscription[]>([]);
   const [iapConnected, setIapConnected] = useState(false);
-  const [iapLoading, setIapLoading] = useState(Platform.OS === 'android' || Platform.OS === 'ios');
+  const [iapLoading, setIapLoading] = useState(false);
 
   // UI state
   const [loading, setLoading] = useState(true);
@@ -421,18 +427,27 @@ const SubscriptionScreen: React.FC<SubscriptionScreenProps> = ({
       const targetSkus = getSubscriptionSkus();
       console.log('[IAP] Requesting SKUs for', Platform.OS, ':', targetSkus);
 
-      let products = await fetchProducts({
-        skus: targetSkus,
-        type: 'subs',
-      });
+      let products: any = [];
+      try {
+        products = await fetchProducts({
+          skus: targetSkus,
+          type: 'subs',
+        });
+      } catch (fetchSubsErr) {
+        console.warn('[IAP] fetchProducts type: subs warning:', fetchSubsErr);
+      }
 
       // If 'subs' returned empty (e.g. Non-Renewing Subscriptions in App Store Connect), try 'in-app'
       if (!products || products.length === 0) {
         console.log('[IAP] fetchProducts type: "subs" returned empty, trying type: "in-app"...');
-        products = await fetchProducts({
-          skus: targetSkus,
-          type: 'in-app',
-        });
+        try {
+          products = await fetchProducts({
+            skus: targetSkus,
+            type: 'in-app',
+          });
+        } catch (fetchInAppErr) {
+          console.warn('[IAP] fetchProducts type: in-app warning:', fetchInAppErr);
+        }
       }
 
       // ── Raw response ────────────────────────────────────────────────────
@@ -474,115 +489,146 @@ const SubscriptionScreen: React.FC<SubscriptionScreenProps> = ({
       setPlayProducts(subscriptions);
     } catch (e: any) {
       console.error('[IAP] ❌ fetchProducts threw an error:', e?.message || e);
-      console.error('[IAP] Error code:', e?.code);
-      console.error('[IAP] Full error:', JSON.stringify(e, null, 2));
     } finally {
       setIapLoading(false);
     }
   }, [iapConnected]);
 
-  // ─── Initialise IAP connection ────────────────────────────────────────────
-  useEffect(() => {
-    fetchData();
+  // ─── Attach IAP connection & listeners lazily on user demand ─────────────
+  const ensureIapConnected = useCallback(async (): Promise<boolean> => {
+    if (Platform.OS !== 'android' && Platform.OS !== 'ios') { return false; }
+    if (iapConnected) { return true; }
 
-    if (Platform.OS !== 'android' && Platform.OS !== 'ios') { return; }
-
-    let mounted = true;
-
-    const init = async () => {
-      try {
-        const connected = await initConnection();
-        if (!mounted) { return; }
-        setIapConnected(!!connected);
-        if (!connected) { setIapLoading(false); }
-        // ── Billing connection diagnostic ──────────────────────────────────
-        // Must print "Billing connected: true" before fetchProducts() runs.
-        // If it prints "false", check: signed build, Play Store installed,
-        // Google account signed in, and package name matches Play Console.
-        console.log('Billing connected:', !!connected);
-      } catch (e) {
-        console.error('❌ IAP initConnection failed:', e);
-        if (mounted) { setIapLoading(false); }
-      }
-    };
-
-    // Purchase update listener — handle subscription verify and finishTransaction (isConsumable: false)
-    purchaseUpdateSubRef.current = purchaseUpdatedListener(async (purchase: Purchase) => {
-      const pid = (purchase as any).productId ?? purchase.productId ?? '';
-      if (restoreInProgressRef.current || !getSubscriptionSkus().includes(pid)) { return; }
-      const transactionKey = `${pid}:${purchase.transactionId || purchase.purchaseToken || ''}`;
-      if (processingTransactionsRef.current.has(transactionKey) || finishedTransactionsRef.current.has(transactionKey)) { return; }
-      processingTransactionsRef.current.add(transactionKey);
-      let ptoken =
-        (purchase as any).transactionReceipt ??
-        (purchase as any).purchaseToken ??
-        (purchase as any).purchaseTokenAndroid ??
-        purchase.transactionId ??
-        '';
-
-      if (Platform.OS === 'ios' && (!ptoken || ptoken.length < 50)) {
+    try {
+      if (!purchaseUpdateSubRef.current) {
         try {
-          const iosReceipt = await getReceiptDataIOS();
-          if (iosReceipt) {
-            ptoken = iosReceipt;
-          }
-        } catch (receiptErr) {
-          console.warn('[IAP Subscriptions] getReceiptDataIOS fallback warning:', receiptErr);
+          purchaseUpdateSubRef.current = purchaseUpdatedListener(async (purchase: Purchase) => {
+            try {
+              const pid = (purchase as any).productId ?? purchase.productId ?? '';
+              if (restoreInProgressRef.current || !getSubscriptionSkus().includes(pid)) { return; }
+              const transactionKey = `${pid}:${purchase.transactionId || purchase.purchaseToken || ''}`;
+              if (processingTransactionsRef.current.has(transactionKey) || finishedTransactionsRef.current.has(transactionKey)) { return; }
+              processingTransactionsRef.current.add(transactionKey);
+              let ptoken =
+                (purchase as any).transactionReceipt ??
+                (purchase as any).purchaseToken ??
+                (purchase as any).purchaseTokenAndroid ??
+                purchase.transactionId ??
+                '';
+
+              if (Platform.OS === 'ios' && (!ptoken || ptoken.length < 50)) {
+                try {
+                  const iosReceipt = await getReceiptDataIOS();
+                  if (iosReceipt) {
+                    ptoken = iosReceipt;
+                  }
+                } catch (receiptErr) {
+                  console.warn('[IAP Subscriptions] getReceiptDataIOS fallback warning:', receiptErr);
+                }
+              }
+
+              console.log('[IAP Subscriptions] Purchase listener received event:', { pid, ptoken: ptoken ? ptoken.substring(0, 15) + '...' : 'none' });
+
+              if (!ptoken) {
+                processingTransactionsRef.current.delete(transactionKey);
+                console.warn('[IAP Subscriptions] Purchase has no token, skipping backend verify');
+                return;
+              }
+
+              if (verifyWithBackendRef.current) {
+                verifyWithBackendRef.current(pid, ptoken, purchase)
+                  .then(() => {
+                    console.log('[IAP Subscriptions] Verified successfully, finishing transaction...');
+                    return finishTransaction({ purchase, isConsumable: false });
+                  })
+                  .then(() => {
+                    finishedTransactionsRef.current.add(transactionKey);
+                    console.log('[IAP Subscriptions] Finished transaction successfully.');
+
+                    // Meta App Events: Subscribe & Purchase
+                    const activePlan = selectedPlanRef.current;
+                    const amountVal = typeof activePlan?.price === 'number' ? activePlan.price : 0;
+                    logMetaSubscribe({
+                      content_id: pid,
+                      content_type: 'partner_subscription',
+                      currency: 'INR',
+                      valueToSum: amountVal,
+                      plan_name: activePlan?.planName,
+                      plan_code: activePlan?.planCode,
+                    });
+                    logMetaPurchase(amountVal, 'INR', {
+                      content_id: pid,
+                      content_type: 'partner_subscription',
+                      plan_name: activePlan?.planName,
+                      plan_code: activePlan?.planCode,
+                    });
+
+                    onSubscriptionActivatedRef.current?.();
+                    setShowPlanModalRef.current?.(false);
+                    setShowSubscriptionSuccessModalRef.current?.(true);
+                  })
+                  .catch((err: any) => {
+                    console.error('❌ Subscription verification failed:', err);
+                    if (isUserPurchasingRef.current) {
+                      const rawMsg = err.message || 'Could not verify purchase with backend.';
+                      const displayMsg = Platform.OS === 'ios' ? rawMsg.replace(/google\s*play/gi, 'App Store') : rawMsg;
+                      showAppModalRef.current?.('Verification Failed', displayMsg, 'error', [{ text: 'OK', onPress: () => closeAppModalRef.current?.(), style: 'default', gradient: true }]);
+                    }
+                  })
+                  .finally(() => {
+                    processingTransactionsRef.current.delete(transactionKey);
+                    isUserPurchasingRef.current = false;
+                    setPaymentProcessingRef.current?.(false);
+                    setPurchasingProductIdRef.current?.(null);
+                  });
+              }
+            } catch (listenerCbErr) {
+              console.warn('[IAP Subscriptions] Error in purchaseUpdatedListener callback:', listenerCbErr);
+            }
+          });
+        } catch (attachErr) {
+          console.warn('⚠️ purchaseUpdatedListener attach failed:', attachErr);
         }
       }
 
-      console.log('[IAP Subscriptions] Purchase listener received event:', { pid, ptoken: ptoken ? ptoken.substring(0, 15) + '...' : 'none' });
-
-      if (!ptoken) {
-        processingTransactionsRef.current.delete(transactionKey);
-        console.warn('[IAP Subscriptions] Purchase has no token, skipping backend verify');
-        return;
-      }
-
-      if (verifyWithBackendRef.current) {
-        verifyWithBackendRef.current(pid, ptoken, purchase)
-          .then(() => {
-            console.log('[IAP Subscriptions] Verified successfully, finishing transaction...');
-            return finishTransaction({ purchase, isConsumable: false });
-          })
-          .then(() => {
-            finishedTransactionsRef.current.add(transactionKey);
-            console.log('[IAP Subscriptions] Finished transaction successfully.');
-            onSubscriptionActivatedRef.current?.();
-            setShowPlanModalRef.current?.(false);
-            setShowSubscriptionSuccessModalRef.current?.(true);
-          })
-          .catch((err: any) => {
-            console.error('❌ Subscription verification failed:', err);
-            // Leave unverified transactions pending so they can be retried safely.
-            if (isUserPurchasingRef.current) {
-              const rawMsg = err.message || 'Could not verify purchase with backend.';
-              const displayMsg = Platform.OS === 'ios' ? rawMsg.replace(/google\s*play/gi, 'App Store') : rawMsg;
-              showAppModalRef.current?.('Verification Failed', displayMsg, 'error', [{ text: 'OK', onPress: () => closeAppModalRef.current?.(), style: 'default', gradient: true }]);
-            }
-          })
-          .finally(() => {
-            processingTransactionsRef.current.delete(transactionKey);
-            isUserPurchasingRef.current = false;
+      if (!purchaseErrorSubRef.current) {
+        try {
+          purchaseErrorSubRef.current = purchaseErrorListener((err: PurchaseError) => {
+            console.error('IAP purchase error event:', err?.code, err?.message);
             setPaymentProcessingRef.current?.(false);
             setPurchasingProductIdRef.current?.(null);
           });
+        } catch (attachErr) {
+          console.warn('⚠️ purchaseErrorListener attach failed:', attachErr);
+        }
       }
-    });
 
-    purchaseErrorSubRef.current = purchaseErrorListener((err: PurchaseError) => {
-      console.error('IAP purchase error event:', err.code, err.message);
-      setPaymentProcessingRef.current?.(false);
-      setPurchasingProductIdRef.current?.(null);
-    });
+      const connected = await initConnection();
+      setIapConnected(!!connected);
+      return !!connected;
+    } catch (e) {
+      console.warn('❌ IAP ensureConnection failed:', e);
+      setIapConnected(false);
+      return false;
+    }
+  }, [iapConnected]);
 
-    init();
+  // ─── Fetch backend plans only on mount (never run native billing on screen open) ──
+  useEffect(() => {
+    fetchData();
 
     return () => {
-      mounted = false;
-      purchaseUpdateSubRef.current?.remove();
-      purchaseErrorSubRef.current?.remove();
-      endConnection().catch(() => {});
+      try {
+        purchaseUpdateSubRef.current?.remove();
+        purchaseUpdateSubRef.current = null;
+      } catch (e) {}
+      try {
+        purchaseErrorSubRef.current?.remove();
+        purchaseErrorSubRef.current = null;
+      } catch (e) {}
+      try {
+        endConnection().catch(() => {});
+      } catch (e) {}
     };
   }, [fetchData]);
 
@@ -710,12 +756,13 @@ const SubscriptionScreen: React.FC<SubscriptionScreenProps> = ({
   // ─── Purchase a paid subscription ─────────────────────────────────────────
   const purchaseGooglePlaySubscription = useCallback(
     async (plan: MergedPlan) => {
-      if (!iapConnected) {
+      const connected = await ensureIapConnected();
+      if (!connected) {
         showAppModal(
           'Store unavailable',
           Platform.OS === 'ios'
-            ? 'App Store purchases are not ready. Please check your internet connection and try again.'
-            : 'Google Play Billing is not ready. Please check your internet connection and try again.',
+            ? 'App Store purchases are not available. Please check your internet connection or contact support.'
+            : 'Google Play Billing is not available on this build. Please contact support to activate your package.',
           'warning',
           [{ text: 'OK', onPress: closeAppModal, style: 'default', gradient: true }],
         );
@@ -740,6 +787,16 @@ const SubscriptionScreen: React.FC<SubscriptionScreenProps> = ({
         setPurchasingProductId(targetProductId);
 
         console.log('🛒 Starting Store purchase:', { targetProductId, platform: Platform.OS });
+
+        // Meta App Event: Initiate Checkout
+        logMetaInitiateCheckout({
+          content_id: targetProductId,
+          content_type: 'subscription_plan',
+          currency: (plan.playProduct as any)?.currency || 'INR',
+          valueToSum: typeof plan.price === 'number' ? plan.price : undefined,
+          plan_name: plan.planName,
+          plan_code: plan.planCode,
+        });
 
         if (Platform.OS === 'ios') {
           try {
@@ -812,7 +869,7 @@ const SubscriptionScreen: React.FC<SubscriptionScreenProps> = ({
         );
       }
     },
-    [iapConnected, showAppModal, closeAppModal]
+    [ensureIapConnected, showAppModal, closeAppModal]
   );
 
   // ─── Restore Purchases ────────────────────────────────────────────────────
@@ -822,11 +879,8 @@ const SubscriptionScreen: React.FC<SubscriptionScreenProps> = ({
     let restoreStage = `Connecting to ${STORE_NAME}`;
     try {
       setIsRestoring(true);
-      if (!iapConnected) {
-        const connected = await initConnection();
-        if (!connected) { throw new Error(`Unable to connect to ${STORE_NAME}`); }
-        setIapConnected(true);
-      }
+      const connected = await ensureIapConnected();
+      if (!connected) { throw new Error(`Unable to connect to ${STORE_NAME}`); }
 
       // Synchronize only on Restore; stop if authentication is cancelled or store is unavailable.
       restoreStage = `Synchronizing with ${STORE_NAME}`;
@@ -979,6 +1033,12 @@ const SubscriptionScreen: React.FC<SubscriptionScreenProps> = ({
 
     // Freemium — handled by backend automatically, no Play purchase needed
     if (NON_PURCHASABLE_PLAN_CODES.has(normalizedCode)) {
+      logMetaStartTrial({
+        content_id: selectedPlan.planCode,
+        content_type: 'freemium_membership',
+        plan_name: selectedPlan.planName,
+        valueToSum: 0,
+      });
       showAppModal('Freemium', 'The Free plan is already active on your account.', 'info', [{ text: 'OK', onPress: closeAppModal, style: 'default', gradient: true }]);
       setShowPlanModal(false);
       return;
@@ -1002,7 +1062,7 @@ const SubscriptionScreen: React.FC<SubscriptionScreenProps> = ({
 
   // ─── Render helpers ───────────────────────────────────────────────────────
   const renderFeaturePoints = (features?: string[]) => {
-    if (!features || features.length === 0) { return null; }
+    if (!features || !Array.isArray(features) || features.length === 0) { return null; }
     return (
       <View style={styles.featuresSection}>
         <Text style={styles.featuresTitle}>Features</Text>
@@ -1066,15 +1126,6 @@ const SubscriptionScreen: React.FC<SubscriptionScreenProps> = ({
           </Text>
         </View>
 
-        {/* Store connection status */}
-        {(Platform.OS === 'android' || Platform.OS === 'ios') && !iapConnected && !iapLoading && (
-          <View style={styles.infoBanner}>
-            <Icon name="info-outline" size={16} color="#7B5E2F" />
-            <Text style={styles.infoBannerText}>
-              {STORE_NAME} is unavailable. Check your connection and store account, then tap Restore Purchases to try again.
-            </Text>
-          </View>
-        )}
 
         {/* Keep Restore visible on both stores, including when a connection needs retrying. */}
         {(Platform.OS === 'android' || Platform.OS === 'ios') && (
@@ -1161,7 +1212,7 @@ const SubscriptionScreen: React.FC<SubscriptionScreenProps> = ({
                       {isFreemium ? 'Free' : plan.displayPrice}
                     </Text>
                     {!isFreemium && (
-                      <Text style={styles.planDuration}>/ {plan.durationLabel}</Text>
+                      <Text style={styles.planDuration}>/ {plan.durationLabel || 'month'}</Text>
                     )}
                     {/* Loading indicator while waiting for Play price */}
                     {!isFreemium && iapLoading && (
@@ -1262,7 +1313,7 @@ const SubscriptionScreen: React.FC<SubscriptionScreenProps> = ({
                 <Text style={styles.modalPrice}>
                   {selectedPlan.displayPrice}
                   {!NON_PURCHASABLE_PLAN_CODES.has(selectedPlan.planCode?.trim().toUpperCase() ?? '') &&
-                    ` / ${selectedPlan.durationLabel}`}
+                    ` / ${selectedPlan.durationLabel || 'month'}`}
                 </Text>
 
 

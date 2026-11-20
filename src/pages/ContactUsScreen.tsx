@@ -5,12 +5,14 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
+  Linking,
 } from 'react-native';
 import SafeAreaView from '../components/SafeAreaView';
 import { compactTopPadding } from '../utils/responsiveLayout';
 import LinearGradient from '../components/AppLinearGradient';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import { PARTNER_CONTACT } from '../constants/legalContent';
+import { logMetaContact } from '../services/metaTracking';
 
 interface ContactUsScreenProps {
   onBack?: () => void;
@@ -25,6 +27,7 @@ const contactDetails = [
     title: 'Phone Support',
     value: PARTNER_CONTACT.phonePrimary,
     detail: 'Daily · 09:00 - 21:00 IST',
+    url: `tel:${PARTNER_CONTACT.phonePrimary.replace(/\s+/g, '')}`,
   },
   {
     id: 'whatsapp',
@@ -32,6 +35,7 @@ const contactDetails = [
     title: 'WhatsApp Support',
     value: PARTNER_CONTACT.phonePrimary,
     detail: 'Live support 09:00 - 21:00 IST',
+    url: `https://wa.me/${PARTNER_CONTACT.phonePrimary.replace(/[^\d]/g, '')}`,
   },
   {
     id: 'email',
@@ -39,6 +43,7 @@ const contactDetails = [
     title: 'Email Support',
     value: PARTNER_CONTACT.emailPrimary,
     detail: 'Replies within 6 hours',
+    url: `mailto:${PARTNER_CONTACT.emailPrimary}`,
   },
   {
     id: 'email-secondary',
@@ -46,6 +51,7 @@ const contactDetails = [
     title: 'Alternate Email',
     value: PARTNER_CONTACT.emailSecondary,
     detail: 'Use for ongoing support threads',
+    url: `mailto:${PARTNER_CONTACT.emailSecondary}`,
   },
   {
     id: 'office',
@@ -126,7 +132,23 @@ const ContactUsScreen: React.FC<ContactUsScreenProps> = ({ onBack }) => {
 
         <View style={styles.contactList}>
           {contactDetails.map((item) => (
-            <TouchableOpacity key={item.id} style={styles.contactCard} activeOpacity={0.8}>
+            <TouchableOpacity
+              key={item.id}
+              style={styles.contactCard}
+              activeOpacity={0.8}
+              onPress={() => {
+                logMetaContact({
+                  contact_method: item.id,
+                  contact_type: item.title,
+                  contact_value: item.value,
+                });
+                if (item.url) {
+                  Linking.openURL(item.url).catch(err =>
+                    console.warn(`Could not open ${item.id} link:`, err),
+                  );
+                }
+              }}
+            >
               <View style={styles.contactIconContainer}>
                 <Icon name={item.icon} size={24} color={PRIMARY_COLOR} />
               </View>

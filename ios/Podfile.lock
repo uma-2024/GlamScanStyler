@@ -16,7 +16,21 @@ PODS:
     - React-Core
   - DoubleConversion (1.1.6)
   - fast_float (8.0.0)
+  - FBAEMKit (18.1.1):
+    - FBSDKCoreKit_Basics (= 18.1.1)
   - FBLazyVector (0.82.1)
+  - FBSDKCoreKit (18.1.1):
+    - FBAEMKit (= 18.1.1)
+    - FBSDKCoreKit_Basics (= 18.1.1)
+  - FBSDKCoreKit_Basics (18.1.1)
+  - FBSDKGamingServicesKit (18.1.1):
+    - FBSDKCoreKit (= 18.1.1)
+    - FBSDKCoreKit_Basics (= 18.1.1)
+    - FBSDKShareKit (= 18.1.1)
+  - FBSDKLoginKit (18.1.1):
+    - FBSDKCoreKit (= 18.1.1)
+  - FBSDKShareKit (18.1.1):
+    - FBSDKCoreKit (= 18.1.1)
   - Firebase/CoreOnly (12.10.0):
     - FirebaseCore (~> 12.10.0)
   - Firebase/Messaging (12.10.0):
@@ -2007,6 +2021,21 @@ PODS:
     - ReactCommon/turbomodule/core
     - SocketRocket
     - Yoga
+  - react-native-fbsdk-next (13.4.3):
+    - React-Core
+    - react-native-fbsdk-next/Core (= 13.4.3)
+    - react-native-fbsdk-next/Login (= 13.4.3)
+    - react-native-fbsdk-next/Share (= 13.4.3)
+  - react-native-fbsdk-next/Core (13.4.3):
+    - FBSDKCoreKit (~> 18.0)
+    - React-Core
+  - react-native-fbsdk-next/Login (13.4.3):
+    - FBSDKLoginKit (~> 18.0)
+    - React-Core
+  - react-native-fbsdk-next/Share (13.4.3):
+    - FBSDKGamingServicesKit (~> 18.0)
+    - FBSDKShareKit (~> 18.0)
+    - React-Core
   - react-native-geolocation-service (5.3.1):
     - React
   - react-native-image-picker (8.2.1):
@@ -3166,6 +3195,7 @@ DEPENDENCIES:
   - React-Mapbuffer (from `../node_modules/react-native/ReactCommon`)
   - React-microtasksnativemodule (from `../node_modules/react-native/ReactCommon/react/nativemodule/microtasks`)
   - react-native-config (from `../node_modules/react-native-config`)
+  - react-native-fbsdk-next (from `../node_modules/react-native-fbsdk-next`)
   - react-native-geolocation-service (from `../node_modules/react-native-geolocation-service`)
   - react-native-image-picker (from `../node_modules/react-native-image-picker`)
   - react-native-maps (from `../node_modules/react-native-maps`)
@@ -3224,6 +3254,12 @@ SPEC REPOS:
   trunk:
     - AppAuth
     - AppCheckCore
+    - FBAEMKit
+    - FBSDKCoreKit
+    - FBSDKCoreKit_Basics
+    - FBSDKGamingServicesKit
+    - FBSDKLoginKit
+    - FBSDKShareKit
     - Firebase
     - FirebaseCore
     - FirebaseCoreExtension
@@ -3338,6 +3374,8 @@ EXTERNAL SOURCES:
     :path: "../node_modules/react-native/ReactCommon/react/nativemodule/microtasks"
   react-native-config:
     :path: "../node_modules/react-native-config"
+  react-native-fbsdk-next:
+    :path: "../node_modules/react-native-fbsdk-next"
   react-native-geolocation-service:
     :path: "../node_modules/react-native-geolocation-service"
   react-native-image-picker:
@@ -3448,7 +3486,13 @@ SPEC CHECKSUMS:
   BVLinearGradient: cb006ba232a1f3e4f341bb62c42d1098c284da70
   DoubleConversion: cb417026b2400c8f53ae97020b2be961b59470cb
   fast_float: b32c788ed9c6a8c584d114d0047beda9664e7cc6
+  FBAEMKit: fbb0a50e13109400d0615e7630a0db26ec6b8206
   FBLazyVector: 0aa6183b9afe3c31fc65b5d1eeef1f3c19b63bfa
+  FBSDKCoreKit: 0063014b3b1f7e975e70b60232b0cf8003839746
+  FBSDKCoreKit_Basics: f4a1e0f38769eb71abaf6395b85e015318fcda49
+  FBSDKGamingServicesKit: b53cdd0293c559ba9a72add38ccd6b541df379e9
+  FBSDKLoginKit: 0e6d0df30ae0a5b33f33d9050ca10ca21e0da234
+  FBSDKShareKit: b588264311416ed8d7eabe1333c552fc4b86aa48
   Firebase: 99f203d3a114c6ba591f3b32263a9626e450af65
   FirebaseCore: f4428e22415ea3b3eca652c2098413dabf2a23a9
   FirebaseCoreExtension: 3473a6ec16a91aee29fb75994a86c0220d2cddf3
@@ -3507,6 +3551,7 @@ SPEC CHECKSUMS:
   React-Mapbuffer: 06d59c448da7e34eb05b3fb2189e12f6a30fec57
   React-microtasksnativemodule: d1ee999dc9052e23f6488b730fa2d383a4ea40e5
   react-native-config: 2249b7e68644c86ea68358f5a0d746d1c648f900
+  react-native-fbsdk-next: 325e4973a478f098bb9406fb2a13fa2e1f5dffeb
   react-native-geolocation-service: 32b2c2a3b91e70ce2a8d0c684801aaeb0a07e0ec
   react-native-image-picker: 0314366753615115fa55c3cc937ac44cb7e75702
   react-native-maps: 452eb21d3a1b5ab56772dc1f1dee04c594d4db15
@@ -3554,7 +3599,7 @@ SPEC CHECKSUMS:
   RNGoogleSignin: 15341729e1f79f1b82740393924cae5e429ad176
   RNImageCropPicker: 90e5f6167d480006c1d76b7a49cb90138c50b65a
   RNNotifee: 5e3b271e8ea7456a36eec994085543c9adca9168
-  RNPermissions: 8f6590d22986c54d1fa44cabbe6ac90a5736046d
+  RNPermissions: 4e9cf655c3494666724f3715b232206842a2b71e
   RNShare: bf3fa119b277d4a1729553e870039427bcb80c93
   RNSVG: 7cf280f47bb61ae1eadcbb7f4014533447f1550e
   RNVectorIcons: 791f13226ec4a3fd13062eda9e892159f0981fae
@@ -3562,6 +3607,6 @@ SPEC CHECKSUMS:
   TOCropViewController: 797deaf39c90e6e9ddd848d88817f6b9a8a09888
   Yoga: 689c8e04277f3ad631e60fe2a08e41d411daf8eb
 
-PODFILE CHECKSUM: 2a066f793167567cc4edcbecaa3f16cf558f0981
+PODFILE CHECKSUM: b2fceffb7a0171c300542825a6ad0a64f39e8590
 
 COCOAPODS: 1.16.2

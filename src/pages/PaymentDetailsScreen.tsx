@@ -21,6 +21,7 @@ import { API_BASE_URL_WITH_API } from '../config/api';
 import CustomModal from '../components/CustomModal';
 import { useModal } from '../hooks/useModal';
 import { updateOnboardingStep } from '../utils/onboardingSteps';
+import { logMetaAddPaymentInfo } from '../services/metaTracking';
 
 interface PaymentDetailsScreenProps {
   onBack?: () => void;
@@ -229,6 +230,11 @@ const PaymentDetailsScreen: React.FC<PaymentDetailsScreenProps> = ({
         await updateOnboardingStep(userId, 'paymentDetails', true);
       }
 
+      // Meta App Event: Add Payment Info (Success)
+      logMetaAddPaymentInfo(true, {
+        payment_type: hasAnyBankField && trimmedUpi ? 'bank_and_upi' : hasAnyBankField ? 'bank_account' : 'upi',
+      });
+
       modal.showAlert('Success', 'Bank & UPI details saved successfully!', 'success');
 
       setTimeout(() => {
@@ -240,6 +246,10 @@ const PaymentDetailsScreen: React.FC<PaymentDetailsScreenProps> = ({
       }, 700);
     } catch (error) {
       console.error('❌ Error saving payment details:', error);
+      // Meta App Event: Add Payment Info (Failure)
+      logMetaAddPaymentInfo(false, {
+        error_message: error instanceof Error ? error.message : 'Failed to save',
+      });
       Alert.alert(
         'Error',
         error instanceof Error

@@ -18,6 +18,7 @@ import {
   Platform,
   TouchableWithoutFeedback,
   Keyboard,
+  DeviceEventEmitter,
 } from 'react-native';
 import SafeAreaView from '../components/SafeAreaView';
 import { compactTopPadding } from '../utils/responsiveLayout';
@@ -34,6 +35,8 @@ import { useModal } from '../hooks/useModal';
 import CustomModal from '../components/CustomModal';
 import { toCloudFrontUrl } from '../utils/cdnUrl';
 import SmoothToggle from '../components/SmoothToggle';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import notifee, { AndroidImportance, TriggerType } from '@notifee/react-native';
 
 const DEFAULT_SERVICE_IMAGE_SOURCE = require('../assets/image.png');
 
@@ -195,6 +198,21 @@ const BookingsScreen: React.FC<BookingsScreenProps> = ({
   const modal = useModal();
 
   useEffect(() => { onTabChange?.(activeTab); }, [activeTab, onTabChange]);
+
+  // Load 30-min reminder toggles from AsyncStorage on mount
+  useEffect(() => {
+    const loadReminders = async () => {
+      try {
+        const stored = await AsyncStorage.getItem('@glammefy_partner:booking_reminders');
+        if (stored) {
+          setReminderToggles(JSON.parse(stored));
+        }
+      } catch (error) {
+        console.error('Error loading booking reminders:', error);
+      }
+    };
+    loadReminders();
+  }, []);
   useLiveStylistBooking({
     stylistId: userId,
     selected: selectedUpcomingBooking,
@@ -208,6 +226,33 @@ const BookingsScreen: React.FC<BookingsScreenProps> = ({
       }
     },
   });
+
+  // Listener to select/open a specific booking from notifications or global modal
+  useEffect(() => {
+    const sub = DeviceEventEmitter.addListener('select_booking', async (eventData: { bookingId: string }) => {
+      if (!eventData?.bookingId) return;
+      const found = bookings.find(b => b.bookingId === eventData.bookingId);
+      if (found) {
+        setActiveTab('upcoming');
+        setSelectedUpcomingBooking(found);
+      } else {
+        try {
+          const res = await fetch(`${API_BASE_URL_WITH_API}/bookings/${eventData.bookingId}/reschedule`, {
+            headers: { Accept: 'application/json' },
+          });
+          const json = await res.json();
+          if (json.success && (json.data?.booking || json.data)) {
+            setActiveTab('upcoming');
+            setSelectedUpcomingBooking(json.data.booking || json.data);
+          }
+        } catch (e) {
+          // ignore
+        }
+      }
+    });
+
+    return () => sub.remove();
+  }, [bookings]);
 
   useEffect(() => {
     onChatVisibilityChange?.(Boolean(chatBooking));
@@ -387,6 +432,107 @@ const BookingsScreen: React.FC<BookingsScreenProps> = ({
     return bookingNow < getBookingStartTimestamp(booking) - 30 * 60 * 1000;
   };
 
+  // Check if reminder toggle can be shown (must be more than 30 minutes before appointment start)
+  const canSetReminder = (booking: Booking): boolean => {
+    try {
+      const startTs = getBookingStartTimestamp(booking);
+      if (isNaN(startTs)) return false;
+      const thirtyMinutesBefore = startTs - 30 * 60 * 1000;
+      return bookingNow < thirtyMinutesBefore;
+    } catch (error) {
+      console.error('Error checking if reminder can be set:', error);
+      return false;
+    }
+  };
+
+  const handleReminderToggle = async (booking: Booking, value: boolean) => {
+    const bookingId = booking.bookingId;
+    const notificationId = `partner-booking-reminder-${bookingId}`;
+
+    if (value) {
+      try {
+        const startTs = getBookingStartTimestamp(booking);
+        if (isNaN(startTs)) {
+          Alert.alert('Notice', 'Unable to calculate appointment time for reminder.');
+          return;
+        }
+
+        const reminderTimestamp = startTs - 30 * 60 * 1000;
+        const now = Date.now();
+
+        if (reminderTimestamp <= now) {
+          Alert.alert('Notice', 'The appointment is less than 30 minutes away.');
+          return;
+        }
+
+        // Request permission if not already granted
+        const settings = await notifee.requestPermission();
+        if (settings.authorizationStatus < 1) {
+          Alert.alert('Permissions Required', 'Please enable notifications to receive booking reminders.');
+          return;
+        }
+
+        let channelId = 'upcoming-service';
+        if (Platform.OS === 'android') {
+          channelId = await notifee.createChannel({
+            id: 'upcoming-service',
+            name: 'Upcoming Service Reminders',
+            importance: AndroidImportance.HIGH,
+            sound: 'default',
+            vibration: true,
+          });
+        }
+
+        await notifee.createTriggerNotification(
+          {
+            id: notificationId,
+            title: 'Upcoming Service Reminder ⏰',
+            body: `Your appointment with ${booking.userName || 'customer'} for ${booking.serviceName || 'service'} starts in 30 minutes!`,
+            android: {
+              channelId,
+              smallIcon: 'ic_launcher',
+              pressAction: {
+                id: 'default',
+              },
+            },
+            data: {
+              bookingId,
+              type: 'upcoming-service',
+            },
+          },
+          {
+            type: TriggerType.TIMESTAMP,
+            timestamp: reminderTimestamp,
+          }
+        );
+
+        setReminderToggles(prev => {
+          const updated = { ...prev, [bookingId]: true };
+          AsyncStorage.setItem('@glammefy_partner:booking_reminders', JSON.stringify(updated)).catch(console.error);
+          return updated;
+        });
+
+        Alert.alert('Reminder Set', 'You will be notified 30 minutes before the appointment.');
+      } catch (err) {
+        console.error('Error scheduling booking reminder:', err);
+        Alert.alert('Error', 'Failed to schedule reminder notification.');
+      }
+    } else {
+      try {
+        await notifee.cancelNotification(notificationId);
+      } catch (err) {
+        console.warn('Error cancelling notification:', err);
+      }
+
+      setReminderToggles(prev => {
+        const updated = { ...prev };
+        delete updated[bookingId];
+        AsyncStorage.setItem('@glammefy_partner:booking_reminders', JSON.stringify(updated)).catch(console.error);
+        return updated;
+      });
+    }
+  };
+
 
   // Helper function to check if booking time has started
   // Helper function to convert time to 24-hour format
@@ -554,8 +700,10 @@ const BookingsScreen: React.FC<BookingsScreenProps> = ({
       <UpcomingBookingDetailsScreen
         booking={selectedUpcomingBooking}
         userImage={userImages[selectedUpcomingBooking.userId] || null}
+        stylistId={userId}
         onBack={() => setSelectedUpcomingBooking(null)}
         onHelp={onHelp}
+        onBookingUpdated={() => setRefreshVersion(prev => prev + 1)}
         onOpenChat={() => {
           setChatBooking(selectedUpcomingBooking);
           setSelectedUpcomingBooking(null);
@@ -1020,21 +1168,20 @@ const BookingsScreen: React.FC<BookingsScreenProps> = ({
                       ) : (
                         /* Confirmed Booking Row: Reminder Toggle + Start Now / Cancel Button */
                         <View style={styles.reminderRow}>
-                          <View style={styles.reminderToggleContainer}>
-                            <SmoothToggle
-                              value={reminderToggles[booking.bookingId] || false}
-                              onValueChange={(value) => {
-                                setReminderToggles(prev => ({
-                                  ...prev,
-                                  [booking.bookingId]: value,
-                                }));
-                              }}
-                              activeTrackColor="#FD8B36"
-                              inactiveTrackColor="#E0E0E0"
-                              thumbColor="#FFFFFF"
-                            />
-                            <Text style={styles.reminderText}>Will notify you 30 mins before</Text>
-                          </View>
+                          {canSetReminder(booking) ? (
+                            <View style={styles.reminderToggleContainer}>
+                              <SmoothToggle
+                                value={reminderToggles[booking.bookingId] || false}
+                                onValueChange={(value) => handleReminderToggle(booking, value)}
+                                activeTrackColor="#FD8B36"
+                                inactiveTrackColor="#E0E0E0"
+                                thumbColor="#FFFFFF"
+                              />
+                              <Text style={styles.reminderText}>Will notify you 30 mins before</Text>
+                            </View>
+                          ) : (
+                            <View style={styles.reminderToggleContainer} />
+                          )}
 
                           {hasBookingStarted(booking) ? (
                             <TouchableOpacity

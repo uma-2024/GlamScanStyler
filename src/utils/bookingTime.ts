@@ -20,27 +20,39 @@ export const getBookingStartTimestamp = (booking: { date: string | Date; startTi
     const dateStr = getBookingDateKey(booking.date);
     if (!dateStr) return NaN;
     const dayMatch = /^(\d{4})-(\d{2})-(\d{2})/.exec(dateStr);
-    const timeMatch = /^(\d{1,2}):(\d{2})$/.exec(booking.startTime || '');
-    
-    if (!dayMatch || !timeMatch) return NaN;
-    
+    if (!dayMatch) return NaN;
+
+    let rawTime = (booking.startTime || '').trim();
+    let detectedPeriod = (booking.period || '').trim().toUpperCase();
+
+    const amPmMatch = rawTime.match(/(am|pm)/i);
+    if (amPmMatch) {
+      detectedPeriod = amPmMatch[1].toUpperCase();
+      rawTime = rawTime.replace(/(am|pm)/i, '').trim();
+    }
+
+    const timeMatch = /^(\d{1,2}):(\d{2})$/.exec(rawTime);
+    if (!timeMatch) return NaN;
+
     const year = Number(dayMatch[1]);
     const month = Number(dayMatch[2]) - 1; // 0-indexed
     const day = Number(dayMatch[3]);
-    
-    const hour = Number(timeMatch[1]);
+
+    let hour = Number(timeMatch[1]);
     const minute = Number(timeMatch[2]);
-    
+
+    if (detectedPeriod === 'PM' && hour < 12) {
+      hour += 12;
+    } else if (detectedPeriod === 'AM' && hour === 12) {
+      hour = 0;
+    }
+
     if (hour > 23 || minute > 59) return NaN;
-    
-    // Slots store startTime in 24-hour format, which the booking cards also
-    // display directly. The separate period field must not reinterpret it:
-    // 12:00 is noon and 00:00 is midnight, even if period is inconsistent.
-    
+
     // Create UTC date considering the +05:30 offset (India Standard Time)
     // IST is UTC + 5:30, so UTC time is IST time minus 5 hours and 30 minutes.
     const utcTimestamp = Date.UTC(year, month, day, hour, minute, 0) - INDIA_OFFSET_MS;
-    
+
     return utcTimestamp;
   } catch {
     return NaN;

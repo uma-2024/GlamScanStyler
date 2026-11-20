@@ -2810,7 +2810,10 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
               {/* Price Section */}
               <View style={styles.ongoingPriceSection}>
                 <Icon name="account-balance-wallet" size={20} color="#FD8B36" />
-                <Text style={styles.ongoingPrice}>₹{ongoingBooking.price}</Text>
+                <Text style={styles.ongoingPrice}>
+                  ₹{parseFloat((Number(ongoingBooking.price || 0) * 1.05).toFixed(2))}
+                </Text>
+                <Text style={styles.ongoingGstSubtext}>(Inc. GST)</Text>
               </View>
             </View>
           </View>
@@ -2962,7 +2965,12 @@ const HomeScreen: React.FC<HomeScreenProps> = ({
                           </View>
                         </View>
                       </View>
-                      <Text style={styles.upcomingCardPrice}>₹{booking.price}</Text>
+                      <View style={styles.upcomingPriceContainer}>
+                        <Text style={styles.upcomingCardPrice}>
+                          ₹{parseFloat((Number(booking.price || 0) * 1.05).toFixed(2))}
+                        </Text>
+                        <Text style={styles.upcomingGstSubtext}>(Inc. GST)</Text>
+                      </View>
                     </LinearGradient>
 
                     {/* Body */}
@@ -4227,6 +4235,12 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#FD8B36',
   },
+  ongoingGstSubtext: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: '#8A7365',
+    marginLeft: 2,
+  },
   ongoingBookingCardHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -4308,10 +4322,21 @@ const styles = StyleSheet.create({
     paddingBottom: 14,
     paddingTop: 12,
   },
+  upcomingPriceContainer: {
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+    marginLeft: 8,
+  },
   upcomingCardPrice: {
     fontSize: 20,
     fontWeight: '800',
     color: '#fff',
+  },
+  upcomingGstSubtext: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: 'rgba(255, 255, 255, 0.85)',
+    marginTop: 1,
   },
   upcomingBookingTop: {
     flexDirection: 'row',

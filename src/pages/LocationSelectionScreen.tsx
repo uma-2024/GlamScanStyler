@@ -29,6 +29,7 @@ import {
   isCompactHeightScreen,
   isSmallScreen,
 } from '../utils/responsiveLayout';
+import { logMetaSearch } from '../services/metaTracking';
 // import BottomNavigation from '../components/BottomNavigation';
 
 interface LocationSelectionScreenProps {
@@ -707,6 +708,10 @@ const LocationSelectionScreen: React.FC<LocationSelectionScreenProps> = ({
       if (trimmedQuery.length >= MIN_SEARCH_QUERY_LENGTH) {
         setIsSearching(true);
         setSearchError(null);
+        logMetaSearch(trimmedQuery, {
+          content_type: 'location',
+          content_id: trimmedQuery.toLowerCase(),
+        });
         try {
           const results = await fetchLocationSearchResults(trimmedQuery);
           setApiResults(results);

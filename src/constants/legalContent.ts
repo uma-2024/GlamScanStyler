@@ -85,7 +85,7 @@ Partners can delete their account directly from the app by going to "Your Profil
 When an account is deleted, we remove or anonymize the account and linked profile data. Booking records, payment records, and booking chat may be retained only to the extent required for transaction history, tax, accounting, dispute handling, fraud prevention, or other legal obligations.
 
 9. Permissions
-The partner app may request camera, photo/media, notification, location, and document upload permissions for profile setup, verification, certificates, service images, booking operations, and support. The app does not request microphone, Bluetooth, or tracking permissions.
+The partner app may request camera, photo/media, notification, location, document upload, and tracking permissions for profile setup, verification, certificates, service images, booking operations, advertising effectiveness measurement, and support. The app does not request microphone or Bluetooth permissions.
 
 10. Updates
 We may update this Privacy Policy from time to time. Continued use of Glammefy Partner after updates means you accept the revised policy.

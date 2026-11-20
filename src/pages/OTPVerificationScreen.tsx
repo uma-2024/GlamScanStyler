@@ -15,6 +15,7 @@ import Icon from 'react-native-vector-icons/MaterialIcons';
 import { API_BASE_URL_WITH_API } from '../config/api';
 import { authenticatedFetch } from '../services/apiClient';
 import { showServiceCompletedNotification } from '../utils/notificationService';
+import { logMetaPurchase } from '../services/metaTracking';
 
 interface OTPVerificationScreenProps {
   booking: {
@@ -295,6 +296,16 @@ const OTPVerificationScreen: React.FC<OTPVerificationScreenProps> = ({
 
         // Return immediately; notification delivery cannot hold the OTP screen open.
         onOTPVerified();
+
+        // Meta App Event: Purchase (Service completed)
+        if (typeof booking.price === 'number' && booking.price > 0) {
+          logMetaPurchase(booking.price, 'INR', {
+            content_id: booking.bookingId,
+            content_type: 'completed_service',
+            service_name: booking.serviceName,
+          });
+        }
+
         void showServiceCompletedNotification(booking.serviceName, booking.userName)
           .catch(error => console.warn('Completion notification failed', error));
       }
@@ -497,7 +508,10 @@ const OTPVerificationScreen: React.FC<OTPVerificationScreenProps> = ({
             )} */}
           </View>
           <View style={styles.priceContainer}>
-            <Text style={styles.priceText}>₹{booking.price}</Text>
+            <Text style={styles.priceText}>
+              ₹{parseFloat((Number(booking.price || 0) * 1.05).toFixed(2))}
+            </Text>
+            <Text style={styles.gstText}>Inc. 5% GST</Text>
           </View>
         </View>
       </View>
@@ -509,7 +523,7 @@ const OTPVerificationScreen: React.FC<OTPVerificationScreenProps> = ({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: '#FFF3E8',
     paddingTop: compactTopPadding(20),
   },
   header: {
@@ -569,8 +583,9 @@ const styles = StyleSheet.create({
   otpInput: {
     flex: 1,
     height: 56,
+    backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: '#E0E0E0',
+    borderColor: '#FED5B3',
     borderRadius: 8,
     textAlign: 'center',
     fontSize: 24,
@@ -654,6 +669,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     borderWidth: 1,
     borderColor: '#FD8B36',
+    backgroundColor: '#FFFFFF',
     gap: 8,
   },
   regenerateButtonText: {
@@ -664,10 +680,17 @@ const styles = StyleSheet.create({
   bookingCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#F5F5F5',
-    borderRadius: 12,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#F0E0D0',
     padding: 16,
     marginTop: 24,
+    shadowColor: '#B7794A',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    elevation: 2,
   },
   stylistImage: {
     width: 80,
@@ -724,7 +747,13 @@ const styles = StyleSheet.create({
   priceText: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#333',
+    color: '#FD8B36',
+  },
+  gstText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#8A7365',
+    marginTop: 2,
   },
 });
 

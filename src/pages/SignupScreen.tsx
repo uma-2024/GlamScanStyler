@@ -16,8 +16,9 @@ import SafeAreaView from '../components/SafeAreaView';
 import { compactTopPadding } from '../utils/responsiveLayout';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import { API_BASE_URL } from '../config/api';
-import Svg from '../assets/google.svg'
+import Svg from '../assets/google.svg';
 import LinearGradient from '../components/AppLinearGradient';
+import { logMetaCompleteRegistration } from '../services/metaTracking';
 const { width } = Dimensions.get('window');
 
 interface SignupScreenProps {
@@ -178,6 +179,13 @@ const SignupScreen: React.FC<SignupScreenProps> = ({
       }
 
       setCreatedUserId(userId);
+
+      // Meta App Event: Complete Registration
+      logMetaCompleteRegistration('phone_signup', {
+        userId,
+        hasReferral: Boolean(referralCode.trim()),
+      });
+
       setShowSuccessModal(true);
     } catch (error) {
       console.error('❌ Error signing up:', error);

@@ -1,6 +1,9 @@
 import UIKit
 import React
 import GoogleSignIn
+#if canImport(AppTrackingTransparency)
+import AppTrackingTransparency
+#endif
 
 class SceneDelegate: UIResponder, UIWindowSceneDelegate {
   var window: UIWindow?
@@ -68,5 +71,22 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
       open: url,
       options: [:]
     )
+  }
+
+  // MARK: - Scene Lifecycle & App Tracking Transparency
+  func sceneDidBecomeActive(_ scene: UIScene) {
+    // Apple App Tracking Transparency (ATT):
+    // Must be requested when application state is active and key window is presented.
+    DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+      if #available(iOS 14, *) {
+        #if canImport(AppTrackingTransparency)
+        if ATTrackingManager.trackingAuthorizationStatus == .notDetermined {
+          ATTrackingManager.requestTrackingAuthorization { status in
+            NSLog("📱 [ATT Native] Scene tracking authorization status: %ld", status.rawValue)
+          }
+        }
+        #endif
+      }
+    }
   }
 }

@@ -6,6 +6,12 @@ import FirebaseCore
 import FirebaseMessaging
 import UserNotifications
 import GoogleSignIn
+#if canImport(AppTrackingTransparency)
+import AppTrackingTransparency
+#endif
+#if canImport(FBSDKCoreKit)
+import FBSDKCoreKit
+#endif
 
 @main
 class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterDelegate {
@@ -20,6 +26,13 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
   ) -> Bool {
     initialLaunchOptions = launchOptions
+
+    #if canImport(FBSDKCoreKit)
+    ApplicationDelegate.shared.application(
+      application,
+      didFinishLaunchingWithOptions: launchOptions
+    )
+    #endif
 
     if FirebaseApp.app() == nil && Bundle.main.path(forResource: "GoogleService-Info", ofType: "plist") != nil {
       FirebaseApp.configure()
@@ -101,10 +114,30 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
     open url: URL,
     options: [UIApplication.OpenURLOptionsKey: Any] = [:]
   ) -> Bool {
+    #if canImport(FBSDKCoreKit)
+    if ApplicationDelegate.shared.application(app, open: url, options: options) {
+      return true
+    }
+    #endif
     if GIDSignIn.sharedInstance.handle(url) {
       return true
     }
     return RCTLinkingManager.application(app, open: url, options: options)
+  }
+
+  // MARK: - App Lifecycle & App Tracking Transparency Fallback
+  func applicationDidBecomeActive(_ application: UIApplication) {
+    DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+      if #available(iOS 14, *) {
+        #if canImport(AppTrackingTransparency)
+        if ATTrackingManager.trackingAuthorizationStatus == .notDetermined {
+          ATTrackingManager.requestTrackingAuthorization { status in
+            NSLog("📱 [ATT Native] App tracking authorization status: %ld", status.rawValue)
+          }
+        }
+        #endif
+      }
+    }
   }
 
   func application(
